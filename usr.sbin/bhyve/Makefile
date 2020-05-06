@@ -72,7 +72,9 @@ SRCS=	\
 	vmgenc.c		\
 	xmsr.c			\
 	spinup_ap.c		\
-	iov.c
+	iov.c			\
+	dm_pass_string.c	\
+	usb_pmapper.c
 
 .if ${MK_BHYVE_SNAPSHOT} != "no"
 SRCS+=	snapshot.c
