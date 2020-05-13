@@ -46,6 +46,7 @@ __FBSDID("$FreeBSD$");
 #include <string.h>
 #include <errno.h>
 #include <pthread.h>
+#include <semaphore.h>
 #include <unistd.h>
 
 #include <machine/vmm_snapshot.h>
@@ -60,7 +61,7 @@ __FBSDID("$FreeBSD$");
 #include "pci_emul.h"
 #include "pci_xhci.h"
 #include "usb_emul.h"
-
+#include "usb_pmapper.h"
 
 static int xhci_debug = 0;
 #define	DPRINTF(params) if (xhci_debug) PRINTLN params
@@ -231,9 +232,14 @@ struct pci_xhci_rtsregs {
 	uint32_t	event_pcs;	/* producer cycle state flag */
 };
 
+/* this is used to describe the VBus Drop state */
+enum pci_xhci_vbdp_state {
+	S3_VBDP_NONE = 0,
+	S3_VBDP_START,
+	S3_VBDP_END
+};
 
 struct pci_xhci_softc;
-
 
 /*
  * USB device emulation container.
@@ -252,6 +258,19 @@ struct pci_xhci_dev_emu {
 	void			*dev_sc;	/* device's softc */
 
 	struct usb_hci		hci;
+};
+
+struct pci_xhci_native_port {
+	struct usb_native_devinfo info;
+	uint8_t vport;
+	uint8_t state;
+};
+
+/* This is used to describe the VBus Drop state */
+struct pci_xhci_vbdp_dev_state {
+	struct	usb_devpath path;
+	uint8_t	vport;
+	uint8_t	state;
 };
 
 struct pci_xhci_softc {
@@ -280,6 +299,13 @@ struct pci_xhci_softc {
 
 	int		usb2_port_start;
 	int		usb3_port_start;
+
+	pthread_t	vbdp_thread;
+	sem_t		vbdp_sem;
+	bool		vbdp_polling;
+	int		vbdp_dev_num;
+	struct pci_xhci_vbdp_dev_state vbdp_devs[XHCI_MAX_DEVICES];
+	struct pci_xhci_native_port native_ports[XHCI_MAX_DEVICES];
 };
 
 
@@ -294,6 +320,12 @@ struct pci_xhci_softc {
 				    (((uint64_t) (a)) & (XHCI_PADDR_SZ - 1)))
 #define	XHCI_GADDR(sc,a)	paddr_guest2host((sc)->xsc_pi->pi_vmctx, \
 				    (a), XHCI_GADDR_SIZE(a))
+
+/* port mapping status */
+#define VPORT_FREE (0)
+#define VPORT_ASSIGNED (1)
+#define VPORT_CONNECTED (2)
+#define VPORT_EMULATED (3)
 
 static int xhci_in_use;
 
@@ -352,6 +384,188 @@ pci_xhci_set_evtrb(struct xhci_trb *evtrb, uint64_t port, uint32_t errcode,
 	evtrb->dwTrb3 = XHCI_TRB_3_TYPE_SET(evtype);
 }
 
+static int
+pci_xhci_convert_speed(int lspeed)
+{
+	/* according to xhci spec, zero means undefined speed */
+	int speed = 0;
+
+	switch (lspeed) {
+	case USB_SPEED_LOW:
+		speed = 0x2;
+		break;
+	case USB_SPEED_FULL:
+		speed = 0x1;
+		break;
+	case USB_SPEED_HIGH:
+		speed = 0x3;
+		break;
+	case USB_SPEED_SUPER:
+		speed = 0x4;
+		break;
+	default:
+		UPRINTF(LFTL, "unkown speed %08x\r\n", lspeed);
+	}
+	return speed;
+}
+
+static int
+pci_xhci_change_port(struct pci_xhci_softc *xdev, int port, int usb_speed,
+		int conn, int need_intr)
+{
+	int speed, error;
+	struct xhci_trb evtrb;
+	struct pci_xhci_portregs *reg;
+
+	reg = XHCI_PORTREG_PTR(xdev, port);
+	if (conn == 0) {
+		reg->portsc &= ~(XHCI_PS_CCS | XHCI_PS_PED);
+		reg->portsc |= (XHCI_PS_CSC |
+				XHCI_PS_PLS_SET(UPS_PORT_LS_RX_DET));
+	} else {
+		speed = pci_xhci_convert_speed(usb_speed);
+		reg->portsc = XHCI_PS_CCS | XHCI_PS_PP | XHCI_PS_CSC;
+		reg->portsc |= XHCI_PS_SPEED_SET(speed);
+	}
+
+	if (!need_intr)
+		return 0;
+
+	if (!(xdev->opregs.usbcmd & XHCI_CMD_INTE))
+		need_intr = 0;
+
+	if (!(xdev->opregs.usbcmd & XHCI_CMD_RS))
+		return 0;
+
+	/* make an event for the guest OS */
+	pci_xhci_set_evtrb(&evtrb,
+			port,
+			XHCI_TRB_ERROR_SUCCESS,
+			XHCI_TRB_EVENT_PORT_STS_CHANGE);
+
+	/* put it in the event ring */
+	error = pci_xhci_insert_event(xdev, &evtrb, 1);
+	if (error != XHCI_TRB_ERROR_SUCCESS)
+		UPRINTF(LWRN, "fail to report port change\r\n");
+
+	UPRINTF(LDBG, "%s: port %d:%08X\r\n", __func__, port, reg->portsc);
+	return (error == XHCI_TRB_ERROR_SUCCESS) ? 0 : -1;
+}
+
+static int
+pci_xhci_connect_port(struct pci_xhci_softc *xdev, int port, int usb_speed,
+		int intr)
+{
+	return pci_xhci_change_port(xdev, port, usb_speed, 1, intr);
+}
+
+static int
+pci_xhci_get_native_port_index_by_path(struct pci_xhci_softc *xdev,
+		struct usb_devpath *path)
+{
+	int i;
+
+	for (i = 0; i < XHCI_MAX_DEVICES; i++)
+		if (usb_dev_path_cmp(&xdev->native_ports[i].info.path, path))
+			return i;
+	return -1;
+}
+
+static int
+pci_xhci_set_native_port_assigned(struct pci_xhci_softc *xdev,
+		struct usb_native_devinfo *info)
+{
+	int i;
+
+	for (i = 0; i < XHCI_MAX_DEVICES; i++)
+		if (xdev->native_ports[i].state == VPORT_FREE)
+			break;
+
+	if (i < XHCI_MAX_DEVICES) {
+		xdev->native_ports[i].info = *info;
+		xdev->native_ports[i].state = VPORT_ASSIGNED;
+		return i;
+	}
+
+	return -1;
+}
+
+static int
+pci_xhci_assign_hub_ports(struct pci_xhci_softc *xdev,
+		struct usb_native_devinfo *info)
+{
+	int index;
+	uint8_t i;
+	struct usb_native_devinfo di;
+	struct usb_devpath *path;
+
+	if (!xdev || !info || info->type != USB_TYPE_EXTHUB)
+		return -1;
+
+	index = pci_xhci_get_native_port_index_by_path(xdev, &info->path);
+	if (index < 0) {
+		UPRINTF(LDBG, "cannot find hub %d-%s\r\n", info->path.bus,
+				usb_dev_path(&info->path));
+		return -1;
+	}
+
+	xdev->native_ports[index].info = *info;
+	UPRINTF(LDBG, "Found an USB hub %d-%s with %d port(s).\r\n",
+			info->path.bus, usb_dev_path(&info->path),
+			info->maxchild);
+
+	path = &di.path;
+	for (i = 1; i <= info->maxchild; i++) {
+
+		/* make a device path for hub ports */
+		memcpy(path->path, info->path.path, info->path.depth);
+		memcpy(path->path + info->path.depth, &i, sizeof(i));
+		memset(path->path + info->path.depth + 1, 0,
+				USB_MAX_TIERS - info->path.depth - 1);
+		path->depth = info->path.depth + 1;
+		path->bus = info->path.bus;
+
+		/* set the device path as assigned */
+		index = pci_xhci_set_native_port_assigned(xdev, &di);
+		if (index < 0) {
+			UPRINTF(LFTL, "too many USB devices\r\n");
+			return -1;
+		}
+		UPRINTF(LDBG, "Add %d-%s as assigned port\r\n",
+				path->bus, usb_dev_path(path));
+	}
+	return 0;
+}
+
+static int
+pci_xhci_get_free_vport(struct pci_xhci_softc *xdev,
+		struct usb_native_devinfo *di)
+{
+	int ports, porte;
+	int i, j, k;
+
+	if (di->bcd < 0x300)
+		ports = xdev->usb2_port_start;
+	else
+		ports = xdev->usb3_port_start;
+
+	porte = ports + (XHCI_MAX_DEVS / 2);
+
+	for (i = ports; i <= porte; i++) {
+		for (j = 0; j < XHCI_MAX_DEVICES; j++) {
+			if (xdev->native_ports[j].vport == i)
+				break;
+
+			k = xdev->vbdp_dev_num;
+			if (k > 0 && xdev->vbdp_devs[j].state == S3_VBDP_START
+					&& xdev->vbdp_devs[j].vport == i)
+				break;
+		}
+		if (j >= XHCI_MAX_DEVICES)
+			return i;
+	}
+	return -1;
+}
 
 /* controller reset */
 static void
@@ -2643,7 +2857,273 @@ pci_xhci_dev_event(struct usb_hci *hci, enum hci_usbev evid, void *param)
 	return (0);
 }
 
+static int
+pci_xhci_native_usb_dev_conn_cb(void *hci_data, void *dev_data)
+{
+	struct pci_xhci_softc *xdev;
+	struct usb_native_devinfo *di;
+	int vport = -1;
+	int index;
+	int rc;
+	int i;
+	int s3_conn = 0;
 
+	xdev = hci_data;
+	di = dev_data;
+
+	/* print physical information about new device */
+	UPRINTF(LINF, "%04x:%04x %d-%s connecting.\r\n", di->vid, di->pid,
+			di->path.bus, usb_dev_path(&di->path));
+
+	index = pci_xhci_get_native_port_index_by_path(xdev, &di->path);
+	if (index < 0) {
+		UPRINTF(LINF, "%04x:%04x %d-%s doesn't belong to this"
+				" vm, bye.\r\n", di->vid, di->pid,
+				di->path.bus, usb_dev_path(&di->path));
+		return 0;
+	}
+
+	if (di->type == USB_TYPE_EXTHUB) {
+		rc = pci_xhci_assign_hub_ports(xdev, di);
+		if (rc < 0)
+			UPRINTF(LFTL, "fail to assign ports of hub %d-%s\r\n",
+					di->path.bus, usb_dev_path(&di->path));
+		return 0;
+	}
+
+	UPRINTF(LINF, "%04x:%04x %d-%s belong to this vm.\r\n", di->vid,
+			di->pid, di->path.bus, usb_dev_path(&di->path));
+
+	for (i = 0; xdev->vbdp_dev_num && i < XHCI_MAX_DEVICES; ++i) {
+		if (xdev->vbdp_devs[i].state != S3_VBDP_START)
+			continue;
+
+		if (!usb_dev_path_cmp(&di->path, &xdev->vbdp_devs[i].path))
+			continue;
+
+		s3_conn = 1;
+		vport = xdev->vbdp_devs[i].vport;
+		UPRINTF(LINF, "Skip and cache connect event for %d-%s\r\n",
+				di->path.bus, usb_dev_path(&di->path));
+		break;
+	}
+
+	if (vport <= 0)
+		vport = pci_xhci_get_free_vport(xdev, di);
+
+	if (vport <= 0) {
+		UPRINTF(LFTL, "no free virtual port for native device %d-%s"
+				"\r\n", di->path.bus,
+				usb_dev_path(&di->path));
+		goto errout;
+	}
+
+	xdev->native_ports[index].vport = vport;
+	xdev->native_ports[index].info = *di;
+	xdev->native_ports[index].state = VPORT_CONNECTED;
+
+	UPRINTF(LINF, "%04X:%04X %d-%s is attached to virtual port %d.\r\n",
+			di->vid, di->pid, di->path.bus,
+			usb_dev_path(&di->path), vport);
+
+	/* we will report connecting event in xhci_vbdp_thread for
+	 * device that hasn't complete the S3 process
+	 */
+	if (s3_conn)
+		return 0;
+
+	/* Trigger port change event for the arriving device */
+	if (pci_xhci_connect_port(xdev, vport, di->speed, 1))
+		UPRINTF(LFTL, "fail to report port event\n");
+
+	return 0;
+errout:
+	return -1;
+}
+
+static int
+pci_xhci_native_usb_dev_disconn_cb(void *hci_data, void *dev_data)
+{
+	struct pci_xhci_vdev *xdev;
+	struct pci_xhci_dev_emu *edev;
+	struct usb_native_devinfo *di;
+	uint8_t vport, slot;
+	uint16_t state;
+	int need_intr = 1;
+	int index;
+	int rc;
+	int i;
+
+	xdev = hci_data;
+	di = dev_data;
+	if (!pci_xhci_is_valid_portnum(ROOTHUB_PORT(di->path))) {
+		UPRINTF(LFTL, "invalid physical port %d\r\n",
+				ROOTHUB_PORT(di->path));
+		return -1;
+	}
+
+	index = pci_xhci_get_native_port_index_by_path(xdev, &di->path);
+	if (index < 0) {
+		UPRINTF(LFTL, "fail to find physical port %d\r\n",
+				ROOTHUB_PORT(di->path));
+		return -1;
+	}
+
+	if (di->type == USB_TYPE_EXTHUB) {
+		rc = pci_xhci_unassign_hub_ports(xdev, di);
+		if (rc < 0)
+			UPRINTF(LFTL, "fail to unassign the ports of hub"
+					" %d-%s\r\n", di->path.bus,
+					usb_dev_path(&di->path));
+		return 0;
+	}
+
+	state = xdev->native_ports[index].state;
+	vport = xdev->native_ports[index].vport;
+
+	if (state == VPORT_CONNECTED && vport > 0) {
+		/*
+		 * When this place is reached, it means the physical
+		 * USB device is disconnected before the emulation
+		 * procedure is started. The related states should be
+		 * cleared for future connecting.
+		 */
+		UPRINTF(LFTL, "disconnect VPORT_CONNECTED device: "
+				"%d-%s vport %d\r\n", di->path.bus,
+				usb_dev_path(&di->path), vport);
+		pci_xhci_disconnect_port(xdev, vport, 0);
+		xdev->native_ports[index].state = VPORT_ASSIGNED;
+		return 0;
+	}
+
+	edev = xdev->devices[vport];
+	for (slot = 1; slot <= XHCI_MAX_SLOTS; ++slot)
+		if (xdev->slots[slot] == edev)
+			break;
+
+	for (i = 0; xdev->vbdp_dev_num && i < XHCI_MAX_VIRT_PORTS; ++i) {
+		if (xdev->vbdp_devs[i].state != S3_VBDP_START)
+			continue;
+
+		if (!usb_dev_path_cmp(&xdev->vbdp_devs[i].path, &di->path))
+			continue;
+
+		/*
+		 * we do nothing here for device that is in the middle of
+		 * S3 resuming process.
+		 */
+		UPRINTF(LINF, "disconnect device %d-%s on vport %d with "
+				"state %d and return.\r\n", di->path.bus,
+				usb_dev_path(&di->path), vport, state);
+		return 0;
+	}
+
+	if (!(state == VPORT_EMULATED || state == VPORT_CONNECTED))
+		UPRINTF(LFTL, "error: unexpected state %d\r\n", state);
+
+	xdev->native_ports[index].state = VPORT_ASSIGNED;
+	xdev->native_ports[index].vport = 0;
+
+	UPRINTF(LINF, "disconnect device %d-%s on vport %d with state %d\r\n",
+			di->path.bus, usb_dev_path(&di->path), vport, state);
+	if (pci_xhci_disconnect_port(xdev, vport, need_intr)) {
+		UPRINTF(LFTL, "fail to report event\r\n");
+		return -1;
+	}
+
+	/*
+	 * At this point, the resources allocated for virtual device
+	 * should not be released, it should be released in the
+	 * pci_xhci_cmd_disable_slot function.
+	 */
+	return 0;
+}
+
+/*
+ * return value:
+ * = 0: succeed without interrupt
+ * > 0: succeed with interrupt
+ * < 0: failure
+ */
+static int
+pci_xhci_usb_dev_notify_cb(void *hci_data, void *udev_data)
+{
+	int slot, epid, intr, rc;
+	struct usb_xfer *xfer;
+	struct pci_xhci_dev_emu *edev;
+	struct pci_xhci_vdev *xdev;
+
+	xfer = udev_data;
+	if (!xfer)
+		return -1;
+
+	epid = xfer->epid;
+	edev = xfer->dev;
+	if (!edev)
+		return -1;
+
+	xdev = edev->xdev;
+	if (!xdev)
+		return -1;
+
+	slot = edev->hci.hci_address;
+	rc = pci_xhci_xfer_complete(xdev, xfer, slot, epid, &intr);
+
+	if (rc)
+		return -1;
+	else if (intr)
+		return 1;
+	else
+		return 0;
+}
+
+static int
+pci_xhci_usb_dev_intr_cb(void *hci_data, void *udev_data)
+{
+	struct pci_xhci_dev_emu *edev;
+
+	edev = hci_data;
+	if (edev && edev->xdev)
+		pci_xhci_assert_interrupt(edev->xdev);
+
+	return 0;
+}
+
+static int
+pci_xhci_usb_dev_lock_ep_cb(void *hci_data, void *udev_data)
+{
+	struct pci_xhci_dev_emu *edev;
+	struct pci_xhci_dev_ep	*ep;
+	int			epid;
+
+	edev = hci_data;
+	epid = *((int *)udev_data);
+
+	if (edev && edev->xdev && epid > 0 && epid < 32) {
+		ep = &edev->eps[epid];
+		pthread_mutex_lock(&ep->mtx);
+	}
+
+	return 0;
+}
+
+static int
+pci_xhci_usb_dev_unlock_ep_cb(void *hci_data, void *udev_data)
+{
+	struct pci_xhci_dev_emu	*edev;
+	struct pci_xhci_dev_ep	*ep;
+	int			epid;
+
+	edev = hci_data;
+	epid = *((int *)udev_data);
+
+	if (edev && edev->xdev && epid > 0 && epid < 32) {
+		ep = &edev->eps[epid];
+		pthread_mutex_unlock(&ep->mtx);
+	}
+
+	return 0;
+}
 
 static void
 pci_xhci_device_usage(char *opt)
@@ -2795,6 +3275,18 @@ pci_xhci_init(struct vmctx *ctx, struct pci_devinst *pi, char *opts)
 		goto done;
 	else
 		error = 0;
+
+	// calls libusb_init
+	if (usb_dev_sys_init(pci_xhci_native_usb_dev_conn_cb,
+				pci_xhci_native_usb_dev_disconn_cb,
+				pci_xhci_usb_dev_notify_cb,
+				pci_xhci_usb_dev_intr_cb,
+				pci_xhci_usb_dev_lock_ep_cb,
+				pci_xhci_usb_dev_unlock_ep_cb,
+				xdev, usb_get_log_level()) < 0) {
+		error = -3;
+		goto done;
+	}
 
 	sc->caplength = XHCI_SET_CAPLEN(XHCI_CAPLEN) |
 	                XHCI_SET_HCIVERSION(0x0100);
