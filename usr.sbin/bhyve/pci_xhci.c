@@ -637,6 +637,44 @@ pci_xhci_get_free_vport(struct pci_xhci_softc *xdev,
 	return -1;
 }
 
+static void *
+xhci_vbdp_thread(void *data)
+{
+	int i, j;
+	int speed;
+	struct pci_xhci_softc *xdev;
+	struct pci_xhci_native_port *p;
+
+	xdev = data;
+	while (xdev->vbdp_polling) {
+
+		sem_wait(&xdev->vbdp_sem);
+		for (i = 0; i < XHCI_MAX_DEVICES; ++i)
+			if (xdev->vbdp_devs[i].state == S3_VBDP_END) {
+				xdev->vbdp_devs[i].state = S3_VBDP_NONE;
+				break;
+			}
+
+		if (i >= XHCI_MAX_DEVICES)
+			continue;
+
+		j = pci_xhci_get_native_port_index_by_path(xdev,
+				&xdev->vbdp_devs[i].path);
+		if (j < 0)
+			continue;
+
+		p = &xdev->native_ports[j];
+		if (p->state != VPORT_CONNECTED)
+			continue;
+
+		speed = pci_xhci_convert_speed(p->info.speed);
+		pci_xhci_connect_port(xdev, p->vport, speed, 1);
+		UPRINTF(LINF, "change portsc for %d-%s\r\n", p->info.path.bus,
+				usb_dev_path(&p->info.path));
+	}
+	return NULL;
+}
+
 /* controller reset */
 static void
 pci_xhci_reset(struct pci_xhci_softc *sc)
@@ -3418,8 +3456,18 @@ pci_xhci_init(struct vmctx *ctx, struct pci_devinst *pi, char *opts)
 
 	pthread_mutex_init(&sc->mtx, NULL);
 
+	/* create vbdp_thread */
+	sc->vbdp_polling = true;
+	sem_init(&sc->vbdp_sem, 0, 0);
+	error = pthread_create(&sc->vbdp_thread, NULL, xhci_vbdp_thread,
+			sc);
+	if (error)
+		goto done;
+
 done:
 	if (error) {
+		xhci_in_use = 0;
+
 		free(sc);
 	}
 
