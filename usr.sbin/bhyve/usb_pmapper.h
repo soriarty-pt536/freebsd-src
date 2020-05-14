@@ -81,7 +81,7 @@ struct usb_dev_req {
 	int     blk_head;
 	int     blk_tail;
 
-	struct usb_xfer *xfer;
+	struct usb_data_xfer *xfer;
 	struct libusb_transfer *trn;
 	struct usb_block *setup_blk;
 };
@@ -130,7 +130,7 @@ void usb_dev_sys_deinit(void);
 void *usb_dev_init(void *pdata, char *opt);
 void usb_dev_deinit(void *pdata);
 int usb_dev_info(void *pdata, int type, void *value, int size);
-int usb_dev_request(void *pdata, struct usb_xfer *xfer);
+int usb_dev_request(void *pdata, struct usb_data_xfer *xfer);
 int usb_dev_reset(void *pdata);
-int usb_dev_data(void *pdata, struct usb_xfer *xfer, int dir, int epctx);
+int usb_dev_data(void *pdata, struct usb_data_xfer *xfer, int dir, int epctx);
 #endif
