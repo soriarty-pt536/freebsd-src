@@ -160,36 +160,15 @@ struct usb_data_xfer_block {
 	int	ccs;
 	uint32_t streamid;
 	uint64_t trbnext;		/* next TRB guest address */
+	enum usb_block_stat stat;	/* processed status */
+	enum usb_block_type type;
+	void *hcb;			/* host controller block */
 };
 
 struct usb_data_xfer {
 	struct usb_data_xfer_block data[USB_MAX_XFER_BLOCKS];
-	struct usb_device_request *ureq; 	/* setup ctl request */
-	int	ndata;				/* # of data items */
-	int	head;
-	int	tail;
-	pthread_mutex_t mtx;
-};
-
-/*
- * Each xfer block is mapped to the hci transfer block.
- * On input into the device handler, blen is set to the lenght of buf.
- * The device handler is to update blen to reflect on the residual size
- * of the buffer, i.e. len(buf) - len(consumed).
- */
-struct usb_block {
-	void			*buf;	   /* IN or OUT pointer */
-	int			blen;	   /* in:len(buf), out:len(remaining) */
-	int			bdone;	   /* bytes transferred */
-	enum usb_block_stat	stat;      /* processed status */
-	enum usb_block_type	type;
-	void                    *hcb;      /* host controller block */
-};
-
-struct usb_xfer {
-	struct usb_block *data;
 	struct usb_dev_req **reqs;
-	struct usb_device_request *ureq;	/* setup ctl request */
+	struct usb_device_request *ureq; 	/* setup ctl request */
 	int	ndata;				/* # of data items */
 	int	head;
 	int	tail;
@@ -198,6 +177,7 @@ struct usb_xfer {
 	int     pid;		/* token id */
 	int	max_blk_cnt;
 	int	status;
+	pthread_mutex_t mtx;
 };
 
 struct usb_devpath {
@@ -293,8 +273,9 @@ struct usb_devemu *usb_emu_finddev(char *name);
 int usb_native_is_bus_existed(uint8_t bus_num);
 int usb_native_is_port_existed(uint8_t bus_num, uint8_t port_num);
 int usb_native_is_device_existed(struct usb_devpath *path);
-struct usb_block *usb_block_append(struct usb_xfer *xfer, void *buf, int blen,
-		void *hcb, int hcb_len);
+struct usb_data_xfer_block *usb_block_append(struct usb_data_xfer *xfer,
+					     void *buf, int blen, void *hcb,
+					     int hcb_len);
 int usb_get_hub_port_num(struct usb_devpath *path);
 char *usb_dev_path(struct usb_devpath *path);
 bool usb_dev_path_cmp(struct usb_devpath *p1, struct usb_devpath *p2);

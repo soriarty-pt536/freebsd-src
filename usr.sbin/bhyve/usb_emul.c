@@ -81,11 +81,11 @@ usb_data_xfer_append(struct usb_data_xfer *xfer, void *buf, int blen,
 	return (xb);
 }
 
-struct usb_block *
-usb_block_append(struct usb_xfer *xfer, void *buf, int blen, void *hcb,
+struct usb_data_xfer_block *
+usb_block_append(struct usb_data_xfer *xfer, void *buf, int blen, void *hcb,
 		int hcb_len)
 {
-	struct usb_block *xb;
+	struct usb_data_xfer_block *xb;
 
 	if (xfer->ndata >= xfer->max_blk_cnt)
 		return NULL;

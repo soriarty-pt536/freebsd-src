@@ -409,6 +409,12 @@ pci_xhci_convert_speed(int lspeed)
 	return speed;
 }
 
+static inline int
+pci_xhci_is_valid_portnum(int n)
+{
+	return n > 0 && n <= XHCI_MAX_DEVS;
+}
+
 static int
 pci_xhci_change_port(struct pci_xhci_softc *xdev, int port, int usb_speed,
 		int conn, int need_intr)
@@ -457,6 +463,13 @@ pci_xhci_connect_port(struct pci_xhci_softc *xdev, int port, int usb_speed,
 		int intr)
 {
 	return pci_xhci_change_port(xdev, port, usb_speed, 1, intr);
+}
+
+static int
+pci_xhci_disconnect_port(struct pci_xhci_softc *xdev, int port, int intr)
+{
+	/* for disconnect, the speed is useless */
+	return pci_xhci_change_port(xdev, port, 0, 0, intr);
 }
 
 static int
@@ -532,6 +545,62 @@ pci_xhci_assign_hub_ports(struct pci_xhci_softc *xdev,
 			return -1;
 		}
 		UPRINTF(LDBG, "Add %d-%s as assigned port\r\n",
+				path->bus, usb_dev_path(path));
+	}
+	return 0;
+}
+
+static void
+pci_xhci_clr_native_port_assigned(struct pci_xhci_softc *xdev,
+		struct usb_native_devinfo *info)
+{
+	int i;
+
+	i = pci_xhci_get_native_port_index_by_path(xdev, &info->path);
+	if (i >= 0) {
+		xdev->native_ports[i].state = VPORT_FREE;
+		xdev->native_ports[i].vport = 0;
+		memset(&xdev->native_ports[i].info, 0, sizeof(*info));
+	}
+}
+
+static int
+pci_xhci_unassign_hub_ports(struct pci_xhci_softc *xdev,
+		struct usb_native_devinfo *info)
+{
+	uint8_t i, index;
+	struct usb_native_devinfo di, *oldinfo;
+	struct usb_devpath *path;
+
+	if (!xdev || !info || info->type != USB_TYPE_EXTHUB)
+		return -1;
+
+	index = pci_xhci_get_native_port_index_by_path(xdev, &info->path);
+	if (index < 0) {
+		UPRINTF(LFTL, "cannot find USB hub %d-%s\r\n",
+			info->path.bus, usb_dev_path(&info->path));
+		return -1;
+	}
+
+	oldinfo = &xdev->native_ports[index].info;
+	UPRINTF(LDBG, "Disconnect an USB hub %d-%s with %d port(s)\r\n",
+			oldinfo->path.bus, usb_dev_path(&oldinfo->path),
+			oldinfo->maxchild);
+
+	path = &di.path;
+	for (i = 1; i <= oldinfo->maxchild; i++) {
+
+		/* make a device path for hub ports */
+		memcpy(path->path, oldinfo->path.path, oldinfo->path.depth);
+		memcpy(path->path + oldinfo->path.depth, &i, sizeof(i));
+		memset(path->path + oldinfo->path.depth + 1, 0,
+				USB_MAX_TIERS - oldinfo->path.depth - 1);
+		path->depth = oldinfo->path.depth + 1;
+		path->bus = oldinfo->path.bus;
+
+		/* clear the device path as not assigned */
+		pci_xhci_clr_native_port_assigned(xdev, &di);
+		UPRINTF(LDBG, "Del %d-%s as assigned port\r\n",
 				path->bus, usb_dev_path(path));
 	}
 	return 0;
@@ -2944,7 +3013,7 @@ errout:
 static int
 pci_xhci_native_usb_dev_disconn_cb(void *hci_data, void *dev_data)
 {
-	struct pci_xhci_vdev *xdev;
+	struct pci_xhci_softc *xdev;
 	struct pci_xhci_dev_emu *edev;
 	struct usb_native_devinfo *di;
 	uint8_t vport, slot;
@@ -3001,7 +3070,7 @@ pci_xhci_native_usb_dev_disconn_cb(void *hci_data, void *dev_data)
 		if (xdev->slots[slot] == edev)
 			break;
 
-	for (i = 0; xdev->vbdp_dev_num && i < XHCI_MAX_VIRT_PORTS; ++i) {
+	for (i = 0; xdev->vbdp_dev_num && i < XHCI_MAX_DEVICES; ++i) {
 		if (xdev->vbdp_devs[i].state != S3_VBDP_START)
 			continue;
 
@@ -3051,7 +3120,7 @@ pci_xhci_usb_dev_notify_cb(void *hci_data, void *udev_data)
 	int slot, epid, intr, rc;
 	struct usb_xfer *xfer;
 	struct pci_xhci_dev_emu *edev;
-	struct pci_xhci_vdev *xdev;
+	struct pci_xhci_softc *xdev;
 
 	xfer = udev_data;
 	if (!xfer)
@@ -3062,7 +3131,7 @@ pci_xhci_usb_dev_notify_cb(void *hci_data, void *udev_data)
 	if (!edev)
 		return -1;
 
-	xdev = edev->xdev;
+	xdev = edev->xsc;
 	if (!xdev)
 		return -1;
 
