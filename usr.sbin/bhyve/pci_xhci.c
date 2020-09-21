@@ -3239,6 +3239,53 @@ pci_xhci_device_usage(char *opt)
 }
 
 static int
+pci_xhci_parse_bus_port(struct pci_xhci_softc *sc, char *opts)
+{
+	int rc = 0;
+	char *tstr;
+	int port, bus, index;
+	struct usb_devpath path;
+	struct usb_native_devinfo di;
+
+	tstr = opts;
+	/* 'bus-port' format */
+	if (!tstr || dm_strtoi(tstr, &tstr, 10, &bus) || *tstr != '-' ||
+		dm_strtoi(tstr + 1, &tstr, 10, &port)) {
+		rc = -1;
+		goto errout;
+	}
+
+	if (bus >= USB_NATIVE_NUM_BUS || port >= USB_NATIVE_NUM_PORT) {
+		rc = -1;
+		goto errout;
+	}
+
+	if (!usb_native_bus_port_existed(bus, port)) {
+		rc = -21;
+		goto errout;
+	}
+
+	port +=1;
+
+	memset(&path, 0, sizeof(path));
+	path.bus = bus;
+	path.depth = 1;
+	path.path[0] = port;
+	di.path = path;
+	index = pci_xhci_set_native_port_assigned(sc, &di);
+	if (index < 0) {
+		fprintf(stderr, "fail to assign native_port\r\n");
+		goto errout;
+	}
+	return 0;
+errout:
+	if (rc)
+		fprintf(stderr, "%s fails, rc=%d\r\n", __func__, rc);
+	return rc;
+
+}
+
+static int
 pci_xhci_parse_opts(struct pci_xhci_softc *sc, char *opts)
 {
 	struct pci_xhci_dev_emu	**devices;
@@ -3247,6 +3294,7 @@ pci_xhci_parse_opts(struct pci_xhci_softc *sc, char *opts)
 	void	*devsc;
 	char	*uopt, *xopts, *config;
 	int	usb3_port, usb2_port, i;
+
 
 	uopt = NULL;
 	usb3_port = sc->usb3_port_start - 1;
@@ -3280,48 +3328,56 @@ pci_xhci_parse_opts(struct pci_xhci_softc *sc, char *opts)
 		else
 			*config++ = '\0';
 
-		ue = usb_emu_finddev(xopts);
-		if (ue == NULL) {
-			pci_xhci_device_usage(xopts);
-			DPRINTF(("pci_xhci device not found %s", xopts));
-			usb2_port = usb3_port = -1;
-			goto done;
-		}
-
-		DPRINTF(("pci_xhci adding device %s, opts \"%s\"",
-		        xopts, config));
-
-		dev = calloc(1, sizeof(struct pci_xhci_dev_emu));
-		dev->xsc = sc;
-		dev->hci.hci_sc = dev;
-		dev->hci.hci_intr = pci_xhci_dev_intr;
-		dev->hci.hci_event = pci_xhci_dev_event;
-
-		if (ue->ue_usbver == 2) {
-			dev->hci.hci_port = usb2_port + 1;
-			devices[usb2_port] = dev;
-			usb2_port++;
+		if (isdigit(xopts[0])) {
+			if (pci_xhci_parse_bus_port(sc, xopts)) {
+				pci_xhci_device_usage(xopts);
+                                goto done;
+                        }
+			fprintf(stderr, "pci_xhci adding device %s, opts \"%s\"\r\n",
+				xopts, config);
 		} else {
-			dev->hci.hci_port = usb3_port + 1;
-			devices[usb3_port] = dev;
-			usb3_port++;
+			ue = usb_emu_finddev(xopts);
+			if (ue == NULL) {
+				pci_xhci_device_usage(xopts);
+				DPRINTF(("pci_xhci device not found %s", xopts));
+				usb2_port = usb3_port = -1;
+				goto done;
+			}
+			DPRINTF(("pci_xhci adding device %s, opts \"%s\"",
+			        xopts, config));
+
+			dev = calloc(1, sizeof(struct pci_xhci_dev_emu));
+			dev->xsc = sc;
+			dev->hci.hci_sc = dev;
+			dev->hci.hci_intr = pci_xhci_dev_intr;
+			dev->hci.hci_event = pci_xhci_dev_event;
+
+			if (ue->ue_usbver == 2) {
+				dev->hci.hci_port = usb2_port + 1;
+				devices[usb2_port] = dev;
+				usb2_port++;
+			} else {
+				dev->hci.hci_port = usb3_port + 1;
+				devices[usb3_port] = dev;
+				usb3_port++;
+			}
+
+			dev->hci.hci_address = 0;
+			devsc = ue->ue_init(&dev->hci, config);
+			if (devsc == NULL) {
+				pci_xhci_device_usage(xopts);
+				usb2_port = usb3_port = -1;
+				goto done;
+			}
+
+			dev->dev_ue = ue;
+			dev->dev_sc = devsc;
+
+			/* assign slot number to device */
+			sc->slots[sc->ndevices] = dev;
+
+			sc->ndevices++;
 		}
-
-		dev->hci.hci_address = 0;
-		devsc = ue->ue_init(&dev->hci, config);
-		if (devsc == NULL) {
-			pci_xhci_device_usage(xopts);
-			usb2_port = usb3_port = -1;
-			goto done;
-		}
-
-		dev->dev_ue = ue;
-		dev->dev_sc = devsc;
-
-		/* assign slot number to device */
-		sc->slots[sc->ndevices] = dev;
-
-		sc->ndevices++;
 	}
 
 portsfinal:
