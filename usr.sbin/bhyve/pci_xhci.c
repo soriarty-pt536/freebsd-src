@@ -296,6 +296,9 @@ struct pci_xhci_softc {
 	struct pci_xhci_portregs *portregs;
 	struct pci_xhci_dev_emu  **devices; /* XHCI[port] = device */
 	struct pci_xhci_dev_emu  **slots;   /* slots assigned from 1 */
+
+	bool            slot_allocated[XHCI_MAX_SLOTS + 1];
+
 	int		ndevices;
 
 	int		usb2_port_start;
@@ -926,6 +929,13 @@ pci_xhci_get_dev_ctx(struct pci_xhci_softc *sc, uint32_t slot)
 	assert(slot > 0 && slot <= sc->ndevices);
 	assert(sc->opregs.dcbaa_p != NULL);
 
+	if (!sc->slot_allocated[slot]) {
+		DPRINTF(("invalid ctx: slot %d, alloc %d dcbaa %p",
+			slot, sc->slot_allocated[slot],
+			sc->opregs.dcbaa_p));
+		return NULL;
+	}
+
 	devctx_addr = sc->opregs.dcbaa_p->dcba[slot];
 
 	if (devctx_addr == 0) {
@@ -1175,6 +1185,16 @@ pci_xhci_cmd_enable_slot(struct pci_xhci_softc *sc, uint32_t *slot)
 				break;
 			}
 		}
+
+	for (i = 1; i <= XHCI_MAX_SLOTS; i++)
+		if (sc->slot_allocated[i] == false)
+			break;
+
+	if (i < XHCI_MAX_SLOTS) {
+		sc->slot_allocated[i] = true;
+		*slot = i;
+		cmderr = XHCI_TRB_ERROR_SUCCESS;
+	}
 
 	DPRINTF(("pci_xhci enable slot (error=%d) slot %u",
 		cmderr != XHCI_TRB_ERROR_SUCCESS, *slot));
@@ -2257,7 +2277,7 @@ pci_xhci_device_doorbell(struct pci_xhci_softc *sc, uint32_t slot,
 	DPRINTF(("pci_xhci doorbell slot %u epid %u stream %u",
 	    slot, epid, streamid));
 
-	if (slot == 0 || slot > sc->ndevices) {
+	if (slot == 0 || slot > sc->ndevices || !sc->slot_allocated[slot]) {
 		DPRINTF(("pci_xhci: invalid doorbell slot %u", slot));
 		return;
 	}
