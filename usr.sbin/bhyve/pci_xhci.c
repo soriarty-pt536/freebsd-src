@@ -385,6 +385,19 @@ pci_xhci_set_evtrb(struct xhci_trb *evtrb, uint64_t port, uint32_t errcode,
 	evtrb->dwTrb3 = XHCI_TRB_3_TYPE_SET(evtype);
 }
 
+static bool
+pci_xhci_is_vport_free(struct pci_xhci_softc *xdev, int portnum)
+{
+	int i;
+
+	for (i = 0; i < XHCI_MAX_DEVICES; i++)
+		if (xdev->native_ports[i].vport == portnum) {
+			return true;
+		}
+
+	return false;
+}
+
 static int
 pci_xhci_convert_speed(int lspeed)
 {
@@ -479,9 +492,24 @@ pci_xhci_get_native_port_index_by_path(struct pci_xhci_softc *xdev,
 {
 	int i;
 
-	for (i = 0; i < XHCI_MAX_DEVICES; i++)
-		if (usb_dev_path_cmp(&xdev->native_ports[i].info.path, path))
+	for (i = 0; i < XHCI_MAX_DEVICES; i++) {
+		if (usb_dev_path_cmp(&xdev->native_ports[i].info.path, path)) {
 			return i;
+		}
+	}
+	return -1;
+}
+
+static int
+pci_xhci_get_native_port_index_by_vport(struct pci_xhci_softc *xdev,
+	uint8_t vport)
+{
+	int i;
+
+	for (i = 0; i < XHCI_MAX_DEVICES; i++)
+		if (xdev->native_ports[i].vport == vport)
+			return i;
+
 	return -1;
 }
 
@@ -530,7 +558,6 @@ pci_xhci_assign_hub_ports(struct pci_xhci_softc *xdev,
 
 	path = &di.path;
 	for (i = 1; i <= info->maxchild; i++) {
-
 		/* make a device path for hub ports */
 		memcpy(path->path, info->path.path, info->path.depth);
 		memcpy(path->path + info->path.depth, &i, sizeof(i));
@@ -695,6 +722,8 @@ pci_xhci_usbcmd_write(struct pci_xhci_softc *sc, uint32_t cmd)
 {
 	int do_intr = 0;
 	int i;
+	int j;
+	struct pci_xhci_native_port *p;
 
 	if (cmd & XHCI_CMD_RS) {
 		do_intr = (sc->opregs.usbcmd & XHCI_CMD_RS) == 0;
@@ -721,6 +750,7 @@ pci_xhci_usbcmd_write(struct pci_xhci_softc *sc, uint32_t cmd)
 				 * XHCI 4.19.3 USB2 RxDetect->Polling,
 				 *             USB3 Polling->U0
 				 */
+
 				if (dev->dev_ue->ue_usbver == 2)
 					port->portsc |=
 					    XHCI_PS_PLS_SET(UPS_PORT_LS_POLL);
@@ -812,8 +842,9 @@ pci_xhci_portregs_write(struct pci_xhci_softc *sc, uint64_t offset,
 		p->portsc &= XHCI_PS_PED | XHCI_PS_PLS_MASK |
 		             XHCI_PS_SPEED_MASK | XHCI_PS_PIC_MASK;
 
-		if (XHCI_DEVINST_PTR(sc, port))
+		if (XHCI_DEVINST_PTR(sc, port) || (pci_xhci_is_vport_free(sc, port) == true)) {
 			p->portsc |= XHCI_PS_CCS;
+		}
 
 		p->portsc |= (value &
 		              ~(XHCI_PS_OCA |
