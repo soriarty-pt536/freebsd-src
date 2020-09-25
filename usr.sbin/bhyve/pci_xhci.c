@@ -161,6 +161,13 @@ struct pci_xhci_trb_ring {
 	uint32_t ccs;			/* consumer cycle state */
 };
 
+struct xhci_ep_timer_data {
+	uint32_t slot;
+	uint8_t epnum;
+	uint8_t dir;
+	struct pci_xhci_dev_emu *dev;
+};
+
 /* device endpoint transfer/stream rings */
 struct pci_xhci_dev_ep {
 	union {
@@ -179,6 +186,7 @@ struct pci_xhci_dev_ep {
 #define	ep_sctx_trbs	_ep_trb_rings._epu_sctx_trbs
 
 	struct usb_data_xfer *ep_xfer;	/* transfer chain */
+	struct xhci_ep_timer_data timer_data;
 	pthread_mutex_t mtx;
 };
 
