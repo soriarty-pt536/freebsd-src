@@ -1434,7 +1434,9 @@ pci_xhci_cmd_address_device(struct pci_xhci_softc *sc, uint32_t slot,
 	struct xhci_slot_ctx	*islot_ctx;
 	struct xhci_dev_ctx	*dev_ctx;
 	struct xhci_endp_ctx	*ep0_ctx;
-	uint32_t		cmderr;
+	struct usb_native_devinfo *di;
+	uint32_t cmderr;
+	uint8_t rh_port;
 
 	input_ctx = XHCI_GADDR(sc, trb->qwTrb0 & ~0xFUL);
 	islot_ctx = &input_ctx->ctx_slot;
