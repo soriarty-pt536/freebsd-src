@@ -784,6 +784,34 @@ pci_xhci_usbcmd_write(struct pci_xhci_softc *sc, uint32_t cmd)
 		cmd &= ~XHCI_CMD_HCRST;
 	}
 
+	if (cmd & XHCI_CMD_CSS) {
+
+		sc->vbdp_dev_num = 0;
+		memset(sc->vbdp_devs, 0, sizeof(sc->vbdp_devs));
+
+		for (i = 0; i < XHCI_MAX_DEVICES; i++) {
+			p = &sc->native_ports[i];
+			if (sc->native_ports[i].state == VPORT_EMULATED) {
+				/* save the device state before suspending */
+				j = sc->vbdp_dev_num;
+				sc->vbdp_devs[i].path = p->info.path;
+				sc->vbdp_devs[i].vport = p->vport;
+				sc->vbdp_devs[i].state = S3_VBDP_START;
+				sc->vbdp_dev_num++;
+
+				/* clear PORTSC register */
+				pci_xhci_init_port(sc, p->vport);
+
+				/* clear other information for this device */
+				p->vport = 0;
+				p->state = VPORT_ASSIGNED;
+				DPRINTF(("s3: save %d-%s state\r\n",
+						p->info.path.bus,
+						usb_dev_path(&p->info.path)));
+			}
+		}
+	 }
+
 	cmd &= ~(XHCI_CMD_CSS | XHCI_CMD_CRS);
 
 	if (do_intr)
