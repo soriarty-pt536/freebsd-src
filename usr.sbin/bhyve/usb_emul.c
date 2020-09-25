@@ -120,11 +120,9 @@ usb_native_is_port_existed(uint8_t bus_num, uint8_t port_num)
 	char buf[128];
 	char cnt[8];
 
-	if (!usb_native_is_bus_existed(bus_num))
-		return 0;
+	snprintf(buf, sizeof(buf), "%s%d.%d", NATIVE_USBSYS_DEVDIR,
+			bus_num, port_num);
 
-	snprintf(buf, sizeof(buf), "%s/usb%d/maxchild", NATIVE_USBSYS_DEVDIR,
-			bus_num);
 	if (access(buf, R_OK)) {
 		UPRINTF(LWRN, "can't find maxchild file\r\n");
 		return 0;
@@ -240,9 +238,6 @@ usb_get_hub_port_num(struct usb_devpath *path)
 	int icnt;
 	char buf[128];
 	char cnt[8];
-
-	if (!usb_native_is_bus_existed(path->bus))
-		return -1;
 
 	snprintf(buf, sizeof(buf), "%s/%d-%s/maxchild", NATIVE_USBSYS_DEVDIR,
 			path->bus, usb_dev_path(path));
