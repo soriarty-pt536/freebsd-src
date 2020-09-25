@@ -56,14 +56,18 @@ __FBSDID("$FreeBSD$");
 #include <dev/usb/usb_freebsd.h>
 #include <xhcireg.h>
 
+#include <ctype.h>
+
 #include "bhyverun.h"
 #include "debug.h"
+#include "dm_pass_string.h"
 #include "pci_emul.h"
 #include "pci_xhci.h"
 #include "usb_emul.h"
 #include "usb_pmapper.h"
 
 static int xhci_debug = 1;
+
 #define	DPRINTF(params) if (xhci_debug) PRINTLN params
 #define	WPRINTF(params) PRINTLN params
 
@@ -395,6 +399,10 @@ static void pci_xhci_update_ep_ring(struct pci_xhci_softc *sc,
     struct pci_xhci_dev_emu *dev, struct pci_xhci_dev_ep *devep,
     struct xhci_endp_ctx *ep_ctx, uint32_t streamid,
     uint64_t ringaddr, int ccs);
+static void pci_xhci_init_port(struct pci_xhci_softc *sc, int portn);
+static void pci_xhci_free_usb_xfer(struct usb_data_xfer *xfer);
+static struct pci_xhci_dev_emu* pci_xhci_dev_create(struct pci_xhci_softc *xdev, void *dev_data);
+static void pci_xhci_dev_destroy(struct pci_xhci_dev_emu *de);
 
 static void
 pci_xhci_set_evtrb(struct xhci_trb *evtrb, uint64_t port, uint32_t errcode,
@@ -3808,7 +3816,6 @@ pci_xhci_init(struct vmctx *ctx, struct pci_devinst *pi, char *opts)
 	else
 		error = 0;
 
-	// calls libusb_init
 	if (usb_dev_sys_init(pci_xhci_native_usb_dev_conn_cb,
 				pci_xhci_native_usb_dev_disconn_cb,
 				pci_xhci_usb_dev_notify_cb,
