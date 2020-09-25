@@ -82,35 +82,33 @@ usb_data_xfer_append(struct usb_data_xfer *xfer, void *buf, int blen,
 }
 
 struct usb_data_xfer_block *
-usb_block_append(struct usb_data_xfer *xfer, void *buf, int blen, void *hcb,
-		int hcb_len)
+usb_block_append(struct usb_data_xfer *xfer, void *buf, int blen, int ccs, int trb_addr, int streamid)
 {
 	struct usb_data_xfer_block *xb;
 
 	if (xfer->ndata >= xfer->max_blk_cnt)
 		return NULL;
 
-	if (hcb == NULL)
-		return NULL;
-
 	xb = &xfer->data[xfer->tail];
 	xb->buf = buf;
 	xb->blen = blen;
-	memcpy(xb->hcb, hcb, hcb_len);
+	xb->ccs = ccs;
+	xb->trb_addr = trb_addr;
+	xb->streamid = streamid;
 	xb->stat = USB_BLOCK_FREE;
 	xb->bdone = 0;
 	xb->type = USB_DATA_NONE;
 	xfer->ndata++;
 	xfer->tail = index_inc(xfer->tail, xfer->max_blk_cnt);
+
 	return xb;
 }
 
 int
-usb_native_is_bus_existed(uint8_t bus_num)
+usb_native_bus_port_existed(uint8_t bus_num, uint8_t port_num)
 {
 	char buf[128];
-
-	snprintf(buf, sizeof(buf), "%s/usb%d", NATIVE_USBSYS_DEVDIR, bus_num);
+	snprintf(buf, sizeof(buf), "%s%d.%d", NATIVE_USBSYS_DEVDIR, bus_num, port_num);
 	return access(buf, R_OK) ? 0 : 1;
 }
 
