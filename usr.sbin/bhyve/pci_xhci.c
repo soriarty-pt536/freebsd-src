@@ -3756,7 +3756,7 @@ pci_xhci_parse_opts(struct pci_xhci_softc *sc, char *opts)
 
 	devices = calloc(XHCI_MAX_DEVS, sizeof(struct pci_xhci_dev_emu *));
 
-	sc->slots = calloc(XHCI_MAX_SLOTS, sizeof(struct pci_xhci_dev_emu *));
+	sc->slots = calloc(XHCI_MAX_SLOTS + 1, sizeof(struct pci_xhci_dev_emu *));
 	sc->devices = devices;
 	sc->ndevices = 0;
 
