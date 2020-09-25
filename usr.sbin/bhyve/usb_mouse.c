@@ -299,12 +299,12 @@ umouse_event(uint8_t button, int x, int y, void *arg)
 }
 
 static void *
-umouse_init(struct usb_hci *hci, char *opt)
+umouse_init(void *pdata, char *opt)
 {
 	struct umouse_softc *sc;
 
 	sc = calloc(1, sizeof(struct umouse_softc));
-	sc->hci = hci;
+	sc->hci = (struct usb_hci *)pdata;
 
 	sc->hid.protocol = 1;	/* REPORT protocol */
 	sc->opt = strdup(opt);
