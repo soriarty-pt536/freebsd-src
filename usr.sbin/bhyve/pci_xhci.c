@@ -3150,7 +3150,10 @@ pci_xhci_reset_port(struct pci_xhci_softc *sc, int portn, int warm)
 	struct pci_xhci_portregs *port;
 	struct pci_xhci_dev_emu	*dev;
 	struct xhci_trb		evtrb;
+	struct usb_native_devinfo *di;
 	int	error;
+	int	speed;
+	int	index;
 
 	assert(portn <= XHCI_MAX_DEVS);
 
@@ -3177,6 +3180,31 @@ pci_xhci_reset_port(struct pci_xhci_softc *sc, int portn, int warm)
 			if (error != XHCI_TRB_ERROR_SUCCESS)
 				DPRINTF(("xhci reset port insert event "
 				         "failed"));
+		}
+	} else {
+		index = pci_xhci_get_native_port_index_by_vport(sc, portn);
+		if (index < 0) {
+			DPRINTF(("fail to reset port %d", portn));
+			return;
+		}
+		di = &sc->native_ports[index].info;
+
+		speed = pci_xhci_convert_speed(di->speed);
+		port->portsc &= ~(XHCI_PS_PLS_MASK | XHCI_PS_PR | XHCI_PS_PRC);
+		port->portsc |= XHCI_PS_PED | XHCI_PS_SPEED_SET(speed);
+
+		if (warm && di->bcd >= 0x300)
+			port->portsc |= XHCI_PS_WRC;
+
+		if ((port->portsc & XHCI_PS_PRC) == 0) {
+			port->portsc |= XHCI_PS_PRC;
+
+			pci_xhci_set_evtrb(&evtrb, portn,
+				XHCI_TRB_ERROR_SUCCESS,
+				XHCI_TRB_EVENT_PORT_STS_CHANGE);
+			error = pci_xhci_insert_event(sc, &evtrb, 1);
+			if (error != XHCI_TRB_ERROR_SUCCESS)
+				DPRINTF(("reset port insert event failed"));
 		}
 	}
 }
