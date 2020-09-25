@@ -2074,7 +2074,7 @@ pci_xhci_dump_trb(struct xhci_trb *trb)
 }
 
 static int
-pci_xhci_xfer_complete(struct pci_xhci_softc *sc, struct usb_data_xfer *xfer,
+pci_xhci_xfer_complete(struct pci_xhci_softc *xdev, struct usb_data_xfer *xfer,
      uint32_t slot, uint32_t epid, int *do_intr)
 {
 	struct pci_xhci_dev_emu *dev;
@@ -2086,57 +2086,94 @@ pci_xhci_xfer_complete(struct pci_xhci_softc *sc, struct usb_data_xfer *xfer,
 	uint32_t trbflags;
 	uint32_t edtla;
 	int i, err;
+	int rem_len = 0;
 
-	dev = XHCI_SLOTDEV_PTR(sc, slot);
 	devep = &dev->eps[epid];
-	dev_ctx = pci_xhci_get_dev_ctx(sc, slot);
+	dev_ctx = pci_xhci_get_dev_ctx(xdev, slot);
 
 	assert(dev_ctx != NULL);
 
 	ep_ctx = &dev_ctx->ctx_ep[epid];
-
 	err = XHCI_TRB_ERROR_SUCCESS;
+
+	/* err is used as completion code and sent to guest driver */
+	switch (xfer->status) {
+	case USB_ERR_STALLED:
+		ep_ctx->dwEpCtx0 = (ep_ctx->dwEpCtx0 & ~0x7) |
+			XHCI_ST_EPCTX_HALTED;
+		err = XHCI_TRB_ERROR_STALL;
+		break;
+	case USB_ERR_SHORT_XFER:
+		err = XHCI_TRB_ERROR_SHORT_PKT;
+		break;
+	case USB_ERR_TIMEOUT:
+	case USB_ERR_IOERROR:
+		err = XHCI_TRB_ERROR_XACT;
+		break;
+	case USB_ERR_BAD_BUFSIZE:
+		err = XHCI_TRB_ERROR_BABBLE;
+		break;
+	case USB_ERR_NORMAL_COMPLETION:
+		break;
+	default:
+		DPRINTF(( "unknown error %d", xfer->status));
+	}
+
 	*do_intr = 0;
 	edtla = 0;
 
 	/* go through list of TRBs and insert event(s) */
-	for (i = xfer->head; xfer->ndata > 0; ) {
-		evtrb.qwTrb0 = (uint64_t)xfer->data[i].hci_data;
-		trb = XHCI_GADDR(sc, evtrb.qwTrb0);
+	for (i = (uint64_t)xfer->head; xfer->ndata > 0; ) {
+		evtrb.qwTrb0 = xfer->data[i].trb_addr;
+		trb = XHCI_GADDR(xdev, evtrb.qwTrb0);
 		trbflags = trb->dwTrb3;
 
-		DPRINTF(("pci_xhci: xfer[%d] done?%u:%d trb %x %016lx %x "
-		         "(err %d) IOC?%d",
-		     i, xfer->data[i].processed, xfer->data[i].blen,
-		     XHCI_TRB_3_TYPE_GET(trbflags), evtrb.qwTrb0,
-		     trbflags, err,
-		     trb->dwTrb3 & XHCI_TRB_3_IOC_BIT ? 1 : 0));
+		DPRINTF(("xfer[%d] done?%u:%d trb %x %016lx %x "
+			"(err %d) IOC?%d, type %d",
+			i, xfer->data[i].stat, xfer->data[i].blen,
+			XHCI_TRB_3_TYPE_GET(trbflags), evtrb.qwTrb0, trbflags,
+			err, trb->dwTrb3 & XHCI_TRB_3_IOC_BIT ? 1 : 0,
+			xfer->data[i].type));
 
-		if (!xfer->data[i].processed) {
-			xfer->head = i;
+		if (xfer->data[i].stat < USB_BLOCK_HANDLED) {
+			xfer->head = (int)i;
 			break;
 		}
 
+		xfer->data[i].stat = USB_BLOCK_FREE;
 		xfer->ndata--;
+		xfer->head = index_inc(xfer->head, xfer->max_blk_cnt);
 		edtla += xfer->data[i].bdone;
 
 		trb->dwTrb3 = (trb->dwTrb3 & ~0x1) | (xfer->data[i].ccs);
 
-		pci_xhci_update_ep_ring(sc, dev, devep, ep_ctx,
-		    xfer->data[i].streamid, xfer->data[i].trbnext,
-		    xfer->data[i].ccs);
+		if (xfer->data[i].type == USB_DATA_PART) {
+			rem_len += xfer->data[i].blen;
+			i = index_inc(i, xfer->max_blk_cnt);
+
+			/* This 'continue' will delay the IOC behavior which
+			 * could decrease the number of virtual interrupts.
+			 * This could GREATLY improve the performance especially
+			 * under ISOCH scenario.
+			 */
+			continue;
+		} else
+			rem_len += xfer->data[i].blen;
+
+		if (err == XHCI_TRB_ERROR_SUCCESS && rem_len > 0)
+			err = XHCI_TRB_ERROR_SHORT_PKT;
 
 		/* Only interrupt if IOC or short packet */
 		if (!(trb->dwTrb3 & XHCI_TRB_3_IOC_BIT) &&
 		    !((err == XHCI_TRB_ERROR_SHORT_PKT) &&
 		      (trb->dwTrb3 & XHCI_TRB_3_ISP_BIT))) {
 
-			i = (i + 1) % USB_MAX_XFER_BLOCKS;
+			i = index_inc(i, xfer->max_blk_cnt);
 			continue;
 		}
 
 		evtrb.dwTrb2 = XHCI_TRB_2_ERROR_SET(err) |
-		               XHCI_TRB_2_REM_SET(xfer->data[i].blen);
+		               XHCI_TRB_2_REM_SET(rem_len);
 
 		evtrb.dwTrb3 = XHCI_TRB_3_TYPE_SET(XHCI_TRB_EVENT_TRANSFER) |
 		    XHCI_TRB_3_SLOT_SET(slot) | XHCI_TRB_3_EP_SET(epid);
@@ -2152,12 +2189,13 @@ pci_xhci_xfer_complete(struct pci_xhci_softc *sc, struct usb_data_xfer *xfer,
 
 		*do_intr = 1;
 
-		err = pci_xhci_insert_event(sc, &evtrb, 0);
+		err = pci_xhci_insert_event(xdev, &evtrb, 0);
 		if (err != XHCI_TRB_ERROR_SUCCESS) {
 			break;
 		}
 
-		i = (i + 1) % USB_MAX_XFER_BLOCKS;
+		i = index_inc(i, xfer->max_blk_cnt);
+		rem_len = 0;
 	}
 
 	return (err);
