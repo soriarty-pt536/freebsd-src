@@ -115,6 +115,9 @@ CFLAGS+= -DWITHOUT_CAPSICUM
 CFLAGS+= -DBHYVE_SNAPSHOT
 .endif
 
+# Temporary disable capsicum, until we integrate checkpoint code with it.
+CFLAGS+= -DWITHOUT_CAPSICUM
+
 .ifdef GDB_LOG
 CFLAGS+=-DGDB_LOG
 .endif
