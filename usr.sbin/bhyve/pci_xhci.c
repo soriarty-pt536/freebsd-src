@@ -325,6 +325,15 @@ struct pci_xhci_softc {
 #define	XHCI_GADDR(sc,a)	paddr_guest2host((sc)->xsc_pi->pi_vmctx, \
 				    (a), XHCI_GADDR_SIZE(a))
 
+#define XHCI_EPTYPE_INVALID	0
+#define XHCI_EPTYPE_ISOC_OUT	1
+#define XHCI_EPTYPE_BULK_OUT	2
+#define XHCI_EPTYPE_INT_OUT	3
+#define XHCI_EPTYPE_CTRL	4
+#define XHCI_EPTYPE_ISOC_IN	5
+#define XHCI_EPTYPE_BULK_IN	6
+#define XHCI_EPTYPE_INT_IN	7
+
 /* port mapping status */
 #define VPORT_FREE (0)
 #define VPORT_ASSIGNED (1)
@@ -1025,8 +1034,85 @@ pci_xhci_deassert_interrupt(struct pci_xhci_softc *sc)
 		pci_lintr_assert(sc->xsc_pi);
 }
 
+static struct usb_data_xfer *
+pci_xhci_alloc_usb_xfer(struct pci_xhci_dev_emu *dev, int epid)
+{
+	struct usb_data_xfer *xfer;
+	struct xhci_dev_ctx *dev_ctx;
+	struct xhci_endp_ctx *ep_ctx;
+	int max_blk_cnt;
+	uint8_t type;
+
+	if (!dev) {
+		return NULL;
+	}
+
+	dev_ctx = dev->dev_ctx;
+	ep_ctx = &dev_ctx->ctx_ep[epid];
+	type = XHCI_EPCTX_1_EPTYPE_GET(ep_ctx->dwEpCtx1);
+
+	/* TODO:
+	 * The following code is still not perfect, due to fixed values are
+	 * not flexible and the overflow risk is still existed.
+	 */
+	switch (type) {
+	case XHCI_EPTYPE_CTRL:
+	case XHCI_EPTYPE_INT_IN:
+	case XHCI_EPTYPE_INT_OUT:
+		max_blk_cnt = 128;
+		break;
+	case XHCI_EPTYPE_BULK_IN:
+	case XHCI_EPTYPE_BULK_OUT:
+		max_blk_cnt = 1024;
+		break;
+	case XHCI_EPTYPE_ISOC_IN:
+	case XHCI_EPTYPE_ISOC_OUT:
+		max_blk_cnt = 2048;
+		break;
+	default:
+		DPRINTF(("err: unexpected epid %d type %d", epid, type));
+		return NULL;
+	}
+
+	xfer = calloc(1, sizeof(struct usb_data_xfer));
+	if (!xfer) {
+		return NULL;
+	}
+
+	xfer->reqs = calloc(max_blk_cnt, sizeof(struct usb_dev_req *));
+	if (!xfer->reqs) {
+		goto fail;
+	}
+
+	DPRINTF(("allocate %d blocks for epid %d type %d",
+			max_blk_cnt, epid, type));
+
+	xfer->max_blk_cnt = max_blk_cnt;
+	xfer->dev = (void *)dev;
+	xfer->epid = epid;
+	return xfer;
+fail:
+	if (xfer->reqs)
+		free(xfer->reqs);
+	free(xfer);
+	return NULL;
+
+}
+
 static void
-pci_xhci_init_ep(struct pci_xhci_dev_emu *dev, int epid)
+pci_xhci_free_usb_xfer(struct usb_data_xfer *xfer)
+{
+	if (!xfer)
+		return;
+
+	free(xfer->data);
+	free(xfer->reqs);
+	free(xfer->ureq);
+	free(xfer);
+}
+
+static void
+pci_xhci_init_ep(struct pci_xhci_dev_emu *dev, int epid, int slot)
 {
 	struct xhci_dev_ctx    *dev_ctx;
 	struct pci_xhci_dev_ep *devep;
@@ -1063,9 +1149,21 @@ pci_xhci_init_ep(struct pci_xhci_dev_emu *dev, int epid)
 	}
 
 	if (devep->ep_xfer == NULL) {
-		devep->ep_xfer = malloc(sizeof(struct usb_data_xfer));
-		USB_DATA_XFER_INIT(devep->ep_xfer);
+		devep->ep_xfer = pci_xhci_alloc_usb_xfer(dev, epid);
+		if (!devep->ep_xfer) {
+			DPRINTF(("[pci_xhci_init_ep] errout"));
+			pci_xhci_free_usb_xfer(devep->ep_xfer);
+			devep->ep_xfer = NULL;
+			devep->timer_data.dev = NULL;
+			devep->timer_data.slot = 0;
+			devep->timer_data.epnum = 0;
+		}
 	}
+
+	devep->timer_data.dev = dev;
+	devep->timer_data.slot = slot;
+	devep->timer_data.epnum = epid;
+	devep->timer_data.dir = (epid & 0x1) ? TOKEN_IN : TOKEN_OUT;
 }
 
 static void
