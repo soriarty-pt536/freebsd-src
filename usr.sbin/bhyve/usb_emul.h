@@ -102,7 +102,7 @@ struct usb_devemu {
 	int	ue_devtype;
 
 	/* instance creation */
-	void	*(*ue_init)(struct usb_hci *hci, char *opt);
+	void  *(*ue_init)(void *pdata, char *opt);
 
 	/* handlers */
 	int	(*ue_request)(void *sc, struct usb_data_xfer *xfer);
@@ -160,9 +160,9 @@ struct usb_data_xfer_block {
 	int	ccs;
 	uint32_t streamid;
 	uint64_t trbnext;		/* next TRB guest address */
+	uint64_t trb_addr;
 	enum usb_block_stat stat;	/* processed status */
 	enum usb_block_type type;
-	void *hcb;			/* host controller block */
 };
 
 struct usb_data_xfer {
@@ -270,12 +270,12 @@ static inline int usb_get_log_level(void)		{ return usb_log_level; }
 static inline void usb_set_log_level(int level)	{ usb_log_level = level; }
 void usb_parse_log_level(char level);
 struct usb_devemu *usb_emu_finddev(char *name);
-int usb_native_is_bus_existed(uint8_t bus_num);
+int usb_native_bus_port_existed(uint8_t bus_num, uint8_t port_num);
 int usb_native_is_port_existed(uint8_t bus_num, uint8_t port_num);
 int usb_native_is_device_existed(struct usb_devpath *path);
 struct usb_data_xfer_block *usb_block_append(struct usb_data_xfer *xfer,
-					     void *buf, int blen, void *hcb,
-					     int hcb_len);
+					     void *buf, int blen, int ccs,
+					     int trb_addr, int streamid);
 int usb_get_hub_port_num(struct usb_devpath *path);
 char *usb_dev_path(struct usb_devpath *path);
 bool usb_dev_path_cmp(struct usb_devpath *p1, struct usb_devpath *p2);
