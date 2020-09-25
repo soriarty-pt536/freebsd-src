@@ -242,7 +242,8 @@ enum USB_ERRCODE {
 #define UPRINTF(lvl, fmt, args...) \
 	do { if (lvl <= usb_log_level) printf(LOG_TAG fmt, ##args); } while (0)
 
-#define NATIVE_USBSYS_DEVDIR "/sys/bus/usb/devices"
+//#define NATIVE_USBSYS_DEVDIR "/sys/bus/usb/devices"
+#define NATIVE_USBSYS_DEVDIR "/dev/ugen"
 #define NATIVE_USB2_SPEED "480"
 #define NATIVE_USB3_SPEED "5000"
 #define USB_NATIVE_NUM_PORT 20
