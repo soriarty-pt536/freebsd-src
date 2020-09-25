@@ -2305,6 +2305,7 @@ pci_xhci_handle_transfer(struct pci_xhci_softc *sc,
 	struct xhci_trb *setup_trb;
 	struct usb_data_xfer *xfer;
 	struct usb_data_xfer_block *xfer_block;
+	struct usb_data_xfer_block *prev_block;
 	uint64_t	val;
 	uint32_t	trbflags;
 	int		do_intr, err;
@@ -2323,6 +2324,7 @@ retry:
 	do_retry = 0;
 	do_intr = 0;
 	setup_trb = NULL;
+	prev_block = NULL;
 
 	while (1) {
 		pci_xhci_dump_trb(trb);
@@ -2344,9 +2346,13 @@ retry:
 			if (trb->dwTrb3 & XHCI_TRB_3_TC_BIT)
 				ccs ^= 0x1;
 
-			xfer_block = usb_data_xfer_append(xfer, NULL, 0,
-			                                  (void *)addr, ccs);
-			xfer_block->processed = 1;
+			xfer_block = usb_block_append(xfer, NULL, 0, ccs, addr, streamid);
+			if (!xfer_block) {
+				err = XHCI_TRB_ERROR_STALL;
+				goto errout;
+			}
+
+			xfer_block->stat = USB_BLOCK_FREE;
 			break;
 
 		case XHCI_TRB_TYPE_SETUP_STAGE:
@@ -2357,20 +2363,35 @@ retry:
 				goto errout;
 			}
 			setup_trb = trb;
-
 			val = trb->qwTrb0;
 			if (!xfer->ureq)
 				xfer->ureq = malloc(
 				           sizeof(struct usb_device_request));
+			if (!xfer->ureq) {
+				err = XHCI_TRB_ERROR_STALL;
+				goto errout;
+			}
+
 			memcpy(xfer->ureq, &val,
 			       sizeof(struct usb_device_request));
 
-			xfer_block = usb_data_xfer_append(xfer, NULL, 0,
-			                                  (void *)addr, ccs);
-			xfer_block->processed = 1;
+			xfer_block = usb_block_append(xfer, NULL, 0, ccs, addr, streamid);
+
+			if (!xfer_block) {
+				free(xfer->ureq);
+				xfer->ureq = NULL;
+				err = XHCI_TRB_ERROR_STALL;
+				goto errout;
+			}
+			xfer_block->stat = USB_BLOCK_HANDLED;
 			break;
 
 		case XHCI_TRB_TYPE_NORMAL:
+			if (setup_trb != NULL) {
+				fprintf(stderr, "trb not supposed to be in ctl scope\r\n");
+				err = XHCI_TRB_ERROR_TRB;
+				goto errout;
+			}
 		case XHCI_TRB_TYPE_ISOCH:
 			if (setup_trb != NULL) {
 				DPRINTF(("pci_xhci: trb not supposed to be in "
@@ -2381,28 +2402,49 @@ retry:
 			/* fall through */
 
 		case XHCI_TRB_TYPE_DATA_STAGE:
-			xfer_block = usb_data_xfer_append(xfer,
-			     (void *)(trbflags & XHCI_TRB_3_IDT_BIT ?
-			         &trb->qwTrb0 : XHCI_GADDR(sc, trb->qwTrb0)),
-			     trb->dwTrb2 & 0x1FFFF, (void *)addr, ccs);
+			xfer_block = usb_block_append(xfer,
+					(void *)(trbflags & XHCI_TRB_3_IDT_BIT ?
+					&trb->qwTrb0 :
+					XHCI_GADDR(sc, trb->qwTrb0)),
+					trb->dwTrb2 & 0x1FFFF, ccs,
+					addr, streamid);
+
+			if (!xfer_block) {
+				err = XHCI_TRB_ERROR_STALL;
+				goto errout;
+			}
+
+			if (trb->dwTrb3 & XHCI_TRB_3_CHAIN_BIT)
+				xfer_block->type = USB_DATA_PART;
+			else
+				xfer_block->type = USB_DATA_FULL;
+
+			prev_block = xfer_block;
 			break;
 
 		case XHCI_TRB_TYPE_STATUS_STAGE:
-			xfer_block = usb_data_xfer_append(xfer, NULL, 0,
-			                                  (void *)addr, ccs);
+			xfer_block = usb_block_append(xfer, NULL, 0, ccs, addr, streamid);
 			break;
 
 		case XHCI_TRB_TYPE_NOOP:
-			xfer_block = usb_data_xfer_append(xfer, NULL, 0,
-			                                  (void *)addr, ccs);
-			xfer_block->processed = 1;
+			if (!xfer_block) {
+				err = XHCI_TRB_ERROR_STALL;
+				goto errout;
+			}
+			xfer_block->stat = USB_BLOCK_HANDLED;
 			break;
 
 		case XHCI_TRB_TYPE_EVENT_DATA:
-			xfer_block = usb_data_xfer_append(xfer, NULL, 0,
-			                                  (void *)addr, ccs);
+			if (!xfer_block) {
+				err = XHCI_TRB_ERROR_TRB;
+				goto errout;
+			}
 			if ((epid > 1) && (trbflags & XHCI_TRB_3_IOC_BIT)) {
-				xfer_block->processed = 1;
+				xfer_block->stat = USB_BLOCK_HANDLED;
+			}
+			if (prev_block && prev_block->type == USB_DATA_PART) {
+				prev_block->type = USB_DATA_FULL;
+				prev_block = NULL;
 			}
 			break;
 
@@ -2419,9 +2461,16 @@ retry:
 		DPRINTF(("pci_xhci: next trb: 0x%lx", (uint64_t)trb));
 
 		if (xfer_block) {
-			xfer_block->trbnext = addr;
-			xfer_block->streamid = streamid;
+			pci_xhci_update_ep_ring(sc, dev, devep, ep_ctx,
+					streamid, addr, ccs);
 		}
+
+		if (trbflags & XHCI_TRB_3_BEI_BIT)
+			continue;
+
+		/* win10 needs it */
+		if (XHCI_TRB_3_TYPE_GET(trbflags) == XHCI_TRB_TYPE_EVENT_DATA)
+			continue;
 
 		if (!setup_trb && !(trbflags & XHCI_TRB_3_CHAIN_BIT) &&
 		    XHCI_TRB_3_TYPE_GET(trbflags) != XHCI_TRB_TYPE_LINK) {
