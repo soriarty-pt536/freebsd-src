@@ -10,10 +10,6 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
-//#include <dev/usb/usb.h>
-//#include <dev/usb/usbdi.h>
-//#include <dev/usb/usbdi_util.h>
-//#include <dev/usb/usb_core.h>
 #include "usb_pass.h"
 #include "usbdi_pass.h"
 #include "usb_pmapper.h"
@@ -1109,6 +1105,7 @@ errout:
 		libusb_close(udev->handle);
 
 	free(udev);
+
 	return NULL;
 }
 
@@ -1226,8 +1223,6 @@ usb_dev_native_sys_disconn_cb(struct libusb_context *ctx, struct libusb_device
 	struct usb_native_devinfo di;
 	bool ret;
 
-	fprintf(stderr, "disconnect event\r\n");
-
 	if (!ctx || !ldev) {
 		fprintf(stderr, "disconnect callback fails!\n");
 		return -1;
@@ -1257,8 +1252,6 @@ usb_dev_sys_init(usb_dev_sys_cb conn_cb, usb_dev_sys_cb disconn_cb,
 	int native_pid, native_vid, native_cls, rc;
 	int num_devs;
 
-	//usb_set_log_level(log_level);
-
 	if (g_ctx.libusb_ctx) {
 		fprintf(stderr, "port mapper is already initialized.\r\n");
 		return -1;
@@ -1266,7 +1259,6 @@ usb_dev_sys_init(usb_dev_sys_cb conn_cb, usb_dev_sys_cb disconn_cb,
 
 	rc = libusb_init(&g_ctx.libusb_ctx);
 	if (rc < 0) {
-		fprintf(stderr, "libusb_init fails, rc:%d\r\n", rc);
 		return -1;
 	}
 
@@ -1318,7 +1310,6 @@ usb_dev_sys_init(usb_dev_sys_cb conn_cb, usb_dev_sys_cb disconn_cb,
 				native_disconn_handle);
 		goto errout;
 	}
-	//pthread_set_name_np(g_ctx.thread, "usb_dev_sys");
 
 	return 0;
 
