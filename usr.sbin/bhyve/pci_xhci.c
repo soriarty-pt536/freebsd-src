@@ -1317,8 +1317,51 @@ pci_xhci_cmd_address_device(struct pci_xhci_softc *sc, uint32_t slot,
 		goto done;
 	}
 
+	if (slot <= 0 || slot > XHCI_MAX_SLOTS ||
+			sc->slot_allocated[slot] == false) {
+		DPRINTF(("address device, invalid slot %d", slot));
+		cmderr = XHCI_TRB_ERROR_SLOT_NOT_ON;
+		goto done;
+	}
+
+	dev = sc->slots[slot];
+	if (!dev) {
+		int index;
+
+		rh_port = XHCI_SCTX_1_RH_PORT_GET(islot_ctx->dwSctx1);
+		index = pci_xhci_get_native_port_index_by_vport(sc, rh_port);
+		if (index < 0) {
+			cmderr = XHCI_TRB_ERROR_TRB;
+			DPRINTF(("invalid root hub port %d", rh_port));
+			goto done;
+		}
+
+		di = &sc->native_ports[index].info;
+		DPRINTF(("create virtual device for %d-%s on virtual "
+				"port %d", di->path.bus,
+				usb_dev_path(&di->path), rh_port));
+
+		dev = pci_xhci_dev_create(sc, di);
+		if (!dev) {
+			DPRINTF(( "fail to create device for %d-%s",
+					di->path.bus,
+					usb_dev_path(&di->path)));
+			goto done;
+		}
+
+		sc->native_ports[index].state = VPORT_EMULATED;
+		sc->devices[rh_port] = dev;
+		sc->ndevices++;
+		sc->slots[slot] = dev;
+		dev->hci.hci_address = slot;
+	}
+
 	/* assign address to slot */
 	dev_ctx = pci_xhci_get_dev_ctx(sc, slot);
+	if (!dev_ctx) {
+		cmderr = XHCI_TRB_ERROR_CONTEXT_STATE;
+		goto done;
+	}
 
 	DPRINTF(("pci_xhci: address device, dev ctx"));
 	DPRINTF(("          slot %08x %08x %08x %08x",
@@ -3280,6 +3323,110 @@ pci_xhci_usb_dev_unlock_ep_cb(void *hci_data, void *udev_data)
 	}
 
 	return 0;
+}
+
+static struct pci_xhci_dev_emu*
+pci_xhci_dev_create(struct pci_xhci_softc *xdev, void *dev_data)
+{
+	struct usb_devemu *ue = NULL;
+	struct pci_xhci_dev_emu *de = NULL;
+	void *ud = NULL;
+	int rc;
+
+	ue = calloc(1, sizeof(struct usb_devemu));
+	if (!ue)
+		return NULL;
+
+	/*
+	 * TODO: at present, the following functions are
+	 * enough. But for the purpose to be compatible with
+	 * usb_mouse.c, the high level design including the
+	 * function interface should be changed and refined
+	 * in future.
+	 */
+	ue->ue_init	= usb_dev_init;
+	ue->ue_request	= usb_dev_request;
+	ue->ue_data	= usb_dev_data;
+	ue->ue_info	= usb_dev_info;
+	ue->ue_reset	= usb_dev_reset;
+	ue->ue_remove	= NULL;
+	ue->ue_stop	= NULL;
+	ue->ue_deinit	= usb_dev_deinit;
+	ue->ue_devtype	= USB_DEV_PORT_MAPPER;
+
+	ud = ue->ue_init(dev_data, NULL);
+	if (!ud) {
+		goto errout;
+	}
+
+	rc = ue->ue_info(ud, USB_INFO_VERSION, &ue->ue_usbver,
+			sizeof(ue->ue_usbver));
+	if (rc < 0) {
+		goto errout;
+	}
+
+	rc = ue->ue_info(ud, USB_INFO_SPEED, &ue->ue_usbspeed,
+			sizeof(ue->ue_usbspeed));
+	if (rc < 0) {
+		goto errout;
+	}
+
+	de = calloc(1, sizeof(struct pci_xhci_dev_emu));
+	if (!de) {
+		goto errout;
+	}
+
+	de->xsc			= xdev;
+	de->dev_ue		= ue;
+	de->dev_sc		= ud;
+	de->hci.hci_sc		= NULL;
+	de->hci.hci_intr	= NULL;
+	de->hci.hci_event	= NULL;
+	de->hci.hci_address	= 0;
+
+	return de;
+
+errout:
+	if (ud)
+		ue->ue_deinit(ud);
+
+	free(ue);
+	free(de);
+	return NULL;
+}
+
+static void
+pci_xhci_dev_destroy(struct pci_xhci_dev_emu *de)
+{
+	struct usb_devemu *ue;
+	struct usb_dev *ud;
+	struct pci_xhci_dev_ep *vdep;
+	int i;
+
+	if (de) {
+		ue = de->dev_ue;
+		ud = de->dev_sc;
+		if (ue) {
+			if (ue->ue_devtype == USB_DEV_PORT_MAPPER) {
+				if (ue->ue_deinit)
+					ue->ue_deinit(ud);
+			}
+		} else
+			return;
+
+		if (ue->ue_devtype == USB_DEV_PORT_MAPPER)
+			free(ue);
+
+		for (i = 1; i < XHCI_MAX_ENDPOINTS; i++) {
+			vdep = &de->eps[i];
+			if (vdep->ep_xfer) {
+				pci_xhci_free_usb_xfer(vdep->ep_xfer);
+				vdep->ep_xfer = NULL;
+			}
+		}
+
+		free(de);
+	}
 }
 
 static void
