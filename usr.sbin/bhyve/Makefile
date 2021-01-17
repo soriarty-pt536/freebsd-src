@@ -85,7 +85,19 @@ CFLAGS.kernemu_dev.c+=	-I${SRCTOP}/sys/amd64
 .PATH:  ${BHYVE_SYSDIR}/sys/amd64/vmm
 SRCS+=	vmm_instruction_emul.c
 
-LIBADD=	vmmapi md pthread z util sbuf cam usb
+LIBADD=	vmmapi md pthread z util sbuf cam 9p usb
+
+.if ${MK_CASPER} != "no"
+LIBADD+=	casper
+LIBADD+=	cap_pwd
+LIBADD+=	cap_grp
+# Temporary disable capsicum, until we integrate checkpoint code with it.
+#CFLAGS+=-DWITH_CASPER
+.endif
+
+.if ${MK_BHYVE_SNAPSHOT} != "no"
+LIBADD+= ucl xo
+.endif
 
 .if ${MK_INET_SUPPORT} != "no"
 CFLAGS+=-DINET
