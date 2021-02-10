@@ -782,7 +782,8 @@ done:
 static int
 bar_access(int coff)
 {
-	if (coff >= PCIR_BAR(0) && coff < PCIR_BAR(PCI_BARMAX + 1))
+	if ((coff >= PCIR_BAR(0) && coff < PCIR_BAR(PCI_BARMAX + 1)) ||
+	    coff == PCIR_BIOS)
 		return (1);
 	else
 		return (0);
