@@ -37,7 +37,6 @@ __FBSDID("$FreeBSD$");
 #endif
 #include <sys/types.h>
 #include <sys/mman.h>
-#include <sys/pciio.h>
 #include <sys/ioctl.h>
 
 #include <dev/io/iodev.h>
@@ -61,12 +60,11 @@ __FBSDID("$FreeBSD$");
 #include <unistd.h>
 
 #include <machine/vmm.h>
-#include <vmmapi.h>
 
 #include "config.h"
 #include "debug.h"
-#include "pci_emul.h"
 #include "mem.h"
+#include "pci_passthru.h"
 
 #ifndef _PATH_DEVPCI
 #define	_PATH_DEVPCI	"/dev/pci"
@@ -78,20 +76,6 @@ __FBSDID("$FreeBSD$");
 #define MSIX_CAPLEN 12
 
 static int pcifd = -1;
-
-struct passthru_softc {
-	struct pci_devinst *psc_pi;
-	struct pcibar psc_bar[PCI_BARMAX + 1];
-	struct {
-		int		capoff;
-		int		msgctrl;
-		int		emulated;
-	} psc_msi;
-	struct {
-		int		capoff;
-	} psc_msix;
-	struct pcisel psc_sel;
-};
 
 static int
 msi_caplen(int msgctrl)
@@ -115,7 +99,7 @@ msi_caplen(int msgctrl)
 	return (len);
 }
 
-static uint32_t
+uint32_t
 read_config(const struct pcisel *sel, long reg, int width)
 {
 	struct pci_io pi;
@@ -131,7 +115,7 @@ read_config(const struct pcisel *sel, long reg, int width)
 		return (pi.pi_data);
 }
 
-static void
+void
 write_config(const struct pcisel *sel, long reg, int width, uint32_t data)
 {
 	struct pci_io pi;
