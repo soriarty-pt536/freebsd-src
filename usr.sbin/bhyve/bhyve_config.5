@@ -139,6 +139,26 @@ Specify the keyboard layout name with the file name in
 This value only works when loaded with UEFI mode for VNC, and
 used a VNC client that don't support QEMU Extended Key Event
 Message (e.g. TightVNC).
+.It Va lpc.pcir.vendor Ta integer Ta 0x8086 Ta
+Vendor id of the LPC bridge as hex number.
+On Intel systems the LPC bridge uses the physical vendor id
+as default value.
+.It Va lpc.pcir.device Ta integer Ta 0x7000 Ta
+Device id of the LPC bridge as hex number.
+On Intel systems the LPC bridge uses the physical device id
+as default value.
+.It Va lpc.pcir.revid Ta integer Ta 0 Ta
+Revision id of the LPC bridge as hex number.
+On Intel systems the LPC bridge uses the physical revision id
+as default value.
+.It Va lpc.pcir.subvendor Ta integer Ta 0 Ta
+Subvendor id of the LPC bridge as hex number.
+On Intel systems the LPC bridge uses the physical subvendor id
+as default value.
+.It Va lpc.pcir.subdevice Ta integer Ta 0 Ta
+Subdevice id of the LPC bridge as hex number.
+On Intel systems the LPC bridge uses the physical subdevice id
+as default value.
 .It Va rtc.use_localtime Ta bool Ta true Ta
 The real time clock uses the local time of the host.
 If this is set to false, the real time clock uses UTC.
