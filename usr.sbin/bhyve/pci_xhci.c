@@ -3341,12 +3341,12 @@ pci_xhci_native_usb_dev_conn_cb(void *hci_data, void *dev_data)
 	di = dev_data;
 
 	/* print physical information about new device */
-	DPRINTF(("%04x:%04x %d-%s connecting.\r\n", di->vid, di->pid,
+	DPRINTF(("%04x:%04x bus:%d,port:%s connecting.\r\n", di->vid, di->pid,
 			di->path.bus, usb_dev_path(&di->path)));
 
 	index = pci_xhci_get_native_port_index_by_path(xdev, &di->path);
 	if (index < 0) {
-		UPRINTF(LINF, "%04x:%04x %d-%s doesn't belong to this"
+		UPRINTF(LINF, "%04x:%04x bus:%d,port:%s doesn't belong to this"
 				" vm, bye.\r\n", di->vid, di->pid,
 				di->path.bus, usb_dev_path(&di->path));
 		return 0;
@@ -3360,7 +3360,7 @@ pci_xhci_native_usb_dev_conn_cb(void *hci_data, void *dev_data)
 		return 0;
 	}
 
-	DPRINTF(("%04x:%04x %d-%s belong to this vm.\r\n", di->vid,
+	DPRINTF(("%04x:%04x bus:%d,port:%s belong to this vm.\r\n", di->vid,
 			di->pid, di->path.bus, usb_dev_path(&di->path)));
 
 	for (i = 0; xdev->vbdp_dev_num && i < XHCI_MAX_DEVICES; ++i) {
@@ -3391,7 +3391,7 @@ pci_xhci_native_usb_dev_conn_cb(void *hci_data, void *dev_data)
 	xdev->native_ports[index].info = *di;
 	xdev->native_ports[index].state = VPORT_CONNECTED;
 
-	DPRINTF(("%04X:%04X %d-%s is attached to virtual port %d.\r\n",
+	DPRINTF(("%04X:%04X bus:%d,port:%s is attached to virtual port %d.\r\n",
 			di->vid, di->pid, di->path.bus,
 			usb_dev_path(&di->path), vport));
 
@@ -3706,39 +3706,32 @@ pci_xhci_device_usage(char *opt)
 }
 
 static int
-pci_xhci_parse_bus_port(struct pci_xhci_softc *sc, char *opts)
+pci_xhci_parse_bus_loc(struct pci_xhci_softc *sc, char *busopt, char *locopt)
 {
 	int rc = 0;
-	char *tstr;
-	int port, bus, index;
-	struct usb_devpath path;
+	int index;
+	struct usb_devpath *path;
 	struct usb_native_devinfo di;
 
-	tstr = opts;
-	/* 'bus-port' format */
-	if (!tstr || dm_strtoi(tstr, &tstr, 10, &bus) || *tstr != '-' ||
-		dm_strtoi(tstr + 1, &tstr, 10, &port)) {
+	if (busopt == NULL || locopt == NULL) {
 		rc = -1;
 		goto errout;
 	}
 
-	if (bus >= USB_NATIVE_NUM_BUS || port >= USB_NATIVE_NUM_PORT) {
+	if (strstr(locopt, "devaddr") == NULL && strstr(locopt, "port") == NULL) {
 		rc = -1;
 		goto errout;
 	}
 
-	if (!usb_native_bus_port_existed(bus, port)) {
+	path = usb_native_get_devpath(busopt, locopt);
+	if (path == NULL) {
 		rc = -21;
 		goto errout;
 	}
 
-	port +=1;
+	di.path = *path;
+	free(path);
 
-	memset(&path, 0, sizeof(path));
-	path.bus = bus;
-	path.depth = 1;
-	path.path[0] = port;
-	di.path = path;
 	index = pci_xhci_set_native_port_assigned(sc, &di);
 	if (index < 0) {
 		fprintf(stderr, "fail to assign native_port\r\n");
@@ -3759,8 +3752,9 @@ pci_xhci_parse_opts(struct pci_xhci_softc *sc, char *opts)
 	struct pci_xhci_dev_emu	*dev;
 	struct usb_devemu	*ue;
 	void	*devsc;
-	char	*uopt, *xopts, *config;
+	char	*uopt, *xopts, *config, *locopt, *bus_loc;
 	int	usb3_port, usb2_port, i;
+	int	bus_loc_len, xopts_len;
 
 
 	uopt = NULL;
@@ -3790,63 +3784,75 @@ pci_xhci_parse_opts(struct pci_xhci_softc *sc, char *opts)
 			goto done;
 		}
 
+		if (strstr(xopts, "bus") != NULL && (locopt = strtok(NULL, ",")) != NULL) {
+			xopts_len = strlen(xopts);
+			bus_loc_len = xopts_len + strlen(",") + strlen(locopt);
+
+			bus_loc = calloc(bus_loc_len + 1, sizeof(char));
+			strncpy(bus_loc, xopts, xopts_len);
+			bus_loc[xopts_len] = ',';
+			strncpy(bus_loc + xopts_len + 1, locopt, strlen(locopt));
+
+			if (pci_xhci_parse_bus_loc(sc, xopts, locopt)) {
+				pci_xhci_device_usage(bus_loc);
+				free(bus_loc);
+				goto done;
+			}
+
+			fprintf(stderr, "pci_xhci adding device %s\r\n", bus_loc);
+			free(bus_loc);
+
+			continue;
+		}
+
 		/* device[=<config>] */
 		if ((config = strchr(xopts, '=')) == NULL)
 			config = "";		/* no config */
 		else
 			*config++ = '\0';
 
-		if (isdigit(xopts[0])) {
-			if (pci_xhci_parse_bus_port(sc, xopts)) {
-				pci_xhci_device_usage(xopts);
-                                goto done;
-                        }
-			fprintf(stderr, "pci_xhci adding device %s, opts \"%s\"\r\n",
-				xopts, config);
-		} else {
-			ue = usb_emu_finddev(xopts);
-			if (ue == NULL) {
-				pci_xhci_device_usage(xopts);
-				DPRINTF(("pci_xhci device not found %s", xopts));
-				usb2_port = usb3_port = -1;
-				goto done;
-			}
-			DPRINTF(("pci_xhci adding device %s, opts \"%s\"",
-			        xopts, config));
-
-			dev = calloc(1, sizeof(struct pci_xhci_dev_emu));
-			dev->xsc = sc;
-			dev->hci.hci_sc = dev;
-			dev->hci.hci_intr = pci_xhci_dev_intr;
-			dev->hci.hci_event = pci_xhci_dev_event;
-
-			if (ue->ue_usbver == 2) {
-				dev->hci.hci_port = usb2_port + 1;
-				devices[usb2_port] = dev;
-				usb2_port++;
-			} else {
-				dev->hci.hci_port = usb3_port + 1;
-				devices[usb3_port] = dev;
-				usb3_port++;
-			}
-
-			dev->hci.hci_address = 0;
-			devsc = ue->ue_init(&dev->hci, config);
-			if (devsc == NULL) {
-				pci_xhci_device_usage(xopts);
-				usb2_port = usb3_port = -1;
-				goto done;
-			}
-
-			dev->dev_ue = ue;
-			dev->dev_sc = devsc;
-
-			/* assign slot number to device */
-			sc->slots[sc->ndevices] = dev;
-			sc->tablet = 1;
-
-			sc->ndevices++;
+		ue = usb_emu_finddev(xopts);
+		if (ue == NULL) {
+			pci_xhci_device_usage(xopts);
+			DPRINTF(("pci_xhci device not found %s", xopts));
+			usb2_port = usb3_port = -1;
+			goto done;
 		}
+		DPRINTF(("pci_xhci adding device %s, opts \"%s\"",
+			xopts, config));
+
+		dev = calloc(1, sizeof(struct pci_xhci_dev_emu));
+		dev->xsc = sc;
+		dev->hci.hci_sc = dev;
+		dev->hci.hci_intr = pci_xhci_dev_intr;
+		dev->hci.hci_event = pci_xhci_dev_event;
+
+		if (ue->ue_usbver == 2) {
+			dev->hci.hci_port = usb2_port + 1;
+			devices[usb2_port] = dev;
+			usb2_port++;
+		} else {
+			dev->hci.hci_port = usb3_port + 1;
+			devices[usb3_port] = dev;
+			usb3_port++;
+		}
+
+		dev->hci.hci_address = 0;
+		devsc = ue->ue_init(&dev->hci, config);
+		if (devsc == NULL) {
+			pci_xhci_device_usage(xopts);
+			usb2_port = usb3_port = -1;
+			goto done;
+		}
+
+		dev->dev_ue = ue;
+		dev->dev_sc = devsc;
+
+		/* assign slot number to device */
+		sc->slots[sc->ndevices] = dev;
+		sc->tablet = 1;
+
+		sc->ndevices++;
 	}
 
 portsfinal:

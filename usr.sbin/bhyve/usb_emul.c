@@ -42,6 +42,7 @@ __FBSDID("$FreeBSD$");
 
 #include "usb_emul.h"
 #include "dm_pass_string.h"
+#include "devinfo.h"
 
 SET_DECLARE(usb_emu_set, struct usb_devemu);
 int usb_log_level;
@@ -102,6 +103,79 @@ usb_block_append(struct usb_data_xfer *xfer, void *buf, int blen, int ccs, int t
 	xfer->tail = index_inc(xfer->tail, xfer->max_blk_cnt);
 
 	return xb;
+}
+
+struct usb_native_search_devinfo_arg {
+	char *bus;
+	char *loc;
+	struct usb_devpath *di;
+};
+
+int
+usb_native_search_devinfo(struct devinfo_dev *dev, void *arg)
+{
+	struct usb_native_search_devinfo_arg *devinfo_arg;
+	struct usb_devpath *di;
+	char *busstr, *portstr;
+	int rv;
+
+	devinfo_arg = (struct usb_native_search_devinfo_arg *) arg;
+	di = NULL;
+
+	if (*dev->dd_name && dev->dd_state >= DS_ATTACHED && *dev->dd_location) {
+		if ((busstr = strstr(dev->dd_location, devinfo_arg->bus)) != NULL
+			&& strstr(dev->dd_location, devinfo_arg->loc) != NULL) {
+			portstr = strstr(dev->dd_location, "port");
+			if (portstr == NULL)
+				goto error;
+
+			di = calloc(1, sizeof(struct usb_devpath));
+			if (di == NULL)
+				goto error;
+
+			portstr += strlen("port=");
+			if (dm_strtoi(portstr, &portstr, 10, (int *) &rv))
+				goto error;
+			di->path[0] = (uint8_t) rv;
+			di->depth = 1;
+
+			busstr += strlen("bus=");
+			if (dm_strtoi(busstr, &busstr, 10, (int *) &rv))
+				goto error;
+			di->bus = (uint8_t) rv;
+
+			devinfo_arg->di = di;
+			return 1;
+		}
+	}
+
+	return devinfo_foreach_device_child(dev, usb_native_search_devinfo,
+		arg);
+
+error:
+	free(di);
+	return 1;
+}
+
+struct usb_devpath *
+usb_native_get_devpath(char *bus, char *loc)
+{
+	struct usb_native_search_devinfo_arg devinfo_arg;
+	struct devinfo_dev *root;
+
+	if (devinfo_init() != 0)
+		return NULL;
+
+	if ((root = devinfo_handle_to_device(DEVINFO_ROOT_DEVICE)) == NULL)
+		return NULL;
+
+	devinfo_arg.bus = bus;
+	devinfo_arg.loc = loc;
+	devinfo_arg.di = NULL;
+
+	devinfo_foreach_device_child(root, usb_native_search_devinfo, &devinfo_arg);
+
+	return devinfo_arg.di;
 }
 
 int

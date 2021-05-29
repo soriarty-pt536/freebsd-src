@@ -85,7 +85,7 @@ CFLAGS.kernemu_dev.c+=	-I${SRCTOP}/sys/amd64
 .PATH:  ${BHYVE_SYSDIR}/sys/amd64/vmm
 SRCS+=	vmm_instruction_emul.c
 
-LIBADD=	vmmapi md pthread z util sbuf cam 9p usb
+LIBADD=	vmmapi md pthread z util sbuf cam 9p usb devinfo
 
 .if ${MK_CASPER} != "no"
 LIBADD+=	casper

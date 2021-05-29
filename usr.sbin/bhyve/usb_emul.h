@@ -271,6 +271,7 @@ static inline int usb_get_log_level(void)		{ return usb_log_level; }
 static inline void usb_set_log_level(int level)	{ usb_log_level = level; }
 void usb_parse_log_level(char level);
 struct usb_devemu *usb_emu_finddev(char *name);
+struct usb_devpath *usb_native_get_devpath(char *bus, char *loc);
 int usb_native_bus_port_existed(uint8_t bus_num, uint8_t port_num);
 int usb_native_is_port_existed(uint8_t bus_num, uint8_t port_num);
 int usb_native_is_device_existed(struct usb_devpath *path);
