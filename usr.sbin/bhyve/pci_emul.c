@@ -33,6 +33,7 @@ __FBSDID("$FreeBSD$");
 
 #include <sys/param.h>
 #include <sys/linker_set.h>
+#include <sys/mman.h>
 
 #include <ctype.h>
 #include <err.h>
@@ -102,6 +103,9 @@ static struct businfo *pci_businfo[MAXBUSES];
 SET_DECLARE(pci_devemu_set, struct pci_devemu);
 
 static uint64_t pci_emul_iobase;
+static uint8_t *pci_emul_rombase;
+static uint64_t pci_emul_romoffset;
+static uint8_t *pci_emul_romlim;
 static uint64_t pci_emul_membase32;
 static uint64_t pci_emul_membase64;
 static uint64_t pci_emul_memlim64;
@@ -118,6 +122,8 @@ TAILQ_HEAD(pci_bar_list, pci_bar_allocation) pci_bars = TAILQ_HEAD_INITIALIZER(
 
 #define	PCI_EMUL_IOBASE		0x2000
 #define	PCI_EMUL_IOLIMIT	0x10000
+
+#define PCI_EMUL_ROMSIZE 0x10000000
 
 #define	PCI_EMUL_ECFG_BASE	0xE0000000		    /* 3.5GB */
 #define	PCI_EMUL_ECFG_SIZE	(MAXBUSES * 1024 * 1024)    /* 1MB per bus */
@@ -840,6 +846,54 @@ pci_emul_assign_bar(struct pci_devinst *const pdi, const int idx,
 	if (type != PCIBAR_ROM) {
 		register_bar(pdi, idx);
 	}
+
+	return (0);
+}
+
+int
+pci_emul_alloc_rom(struct pci_devinst *const pdi, const uint64_t size,
+    void **const addr)
+{
+	/* allocate ROM space once on first call */
+	if (pci_emul_rombase == 0) {
+		pci_emul_rombase = vm_create_devmem(pdi->pi_vmctx, VM_PCIROM,
+		    "pcirom", PCI_EMUL_ROMSIZE);
+		if (pci_emul_rombase == MAP_FAILED) {
+			warnx("%s: failed to create rom segment", __func__);
+			return (-1);
+		}
+		pci_emul_romlim = pci_emul_rombase + PCI_EMUL_ROMSIZE;
+		pci_emul_romoffset = 0;
+	}
+
+	/* ROM size should be a power of 2 and greater than 2 KB */
+	const uint64_t rom_size = MAX(1UL << flsl(size),
+	    ~PCIM_BIOS_ADDR_MASK + 1);
+
+	/* check if ROM fits into ROM space */
+	if (pci_emul_romoffset + rom_size > PCI_EMUL_ROMSIZE) {
+		warnx("%s: no space left in rom segment:", __func__);
+		warnx("%16lu bytes left",
+		    PCI_EMUL_ROMSIZE - pci_emul_romoffset);
+		warnx("%16lu bytes required by %d/%d/%d", rom_size, pdi->pi_bus,
+		    pdi->pi_slot, pdi->pi_func);
+		return (-1);
+	}
+
+	/* allocate ROM BAR */
+	const int error = pci_emul_alloc_bar(pdi, PCI_ROM_IDX, PCIBAR_ROM,
+	    rom_size);
+	if (error)
+		return error;
+
+	/* return address */
+	*addr = pci_emul_rombase + pci_emul_romoffset;
+
+	/* save offset into ROM Space */
+	pdi->pi_romoffset = pci_emul_romoffset;
+
+	/* increase offset for next ROM */
+	pci_emul_romoffset += rom_size;
 
 	return (0);
 }
