@@ -3765,7 +3765,7 @@ pci_xhci_parse_opts(struct pci_xhci_softc *sc, char *opts)
 	if (opts == NULL)
 		goto portsfinal;
 
-	devices = calloc(XHCI_MAX_DEVS, sizeof(struct pci_xhci_dev_emu *));
+	devices = calloc(XHCI_MAX_DEVS + 1, sizeof(struct pci_xhci_dev_emu *));
 
 	sc->slots = calloc(XHCI_MAX_SLOTS + 1, sizeof(struct pci_xhci_dev_emu *));
 	sc->devices = devices;
@@ -3856,7 +3856,7 @@ pci_xhci_parse_opts(struct pci_xhci_softc *sc, char *opts)
 	}
 
 portsfinal:
-	sc->portregs = calloc(XHCI_MAX_DEVS, sizeof(struct pci_xhci_portregs));
+	sc->portregs = calloc(XHCI_MAX_DEVS + 1, sizeof(struct pci_xhci_portregs));
 
 	if (sc->ndevices > 0) {
 		/* port and slot numbering start from 1 */
