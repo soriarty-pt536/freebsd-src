@@ -111,9 +111,16 @@ lpc_device_parse(const char *opts)
 
 			varfile = strsep(&str, ",");
 			if (varfile != NULL) {
-				set_config_value("lpc.bootvars", varfile);
+				if (strchr(varfile, '=') == NULL)
+					set_config_value("lpc.bootvars", varfile);
+				else
+					pci_parse_legacy_config(nvl, str);
 			}
 
+			/* use qemu as default fwcfg */
+			set_config_value_if_unset("lpc.fwcfg", "qemu");
+
+			pci_parse_legacy_config(nvl, str);
 			error = 0;
 			goto done;
 		}
@@ -157,7 +164,13 @@ const char *
 lpc_bootrom(void)
 {
 
-	return (get_config_value("lpc.bootrom"));
+	return (get_config_value("lpc.bootrom.code"));
+}
+
+const char *
+lpc_fwcfg(void)
+{
+	return (get_config_value("lpc.bootrom.fwcfg"));
 }
 
 static void
