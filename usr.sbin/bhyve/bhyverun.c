@@ -1380,8 +1380,13 @@ main(int argc, char *argv[])
 		assert(error == 0);
 	}
 
-	if (lpc_bootrom())
-		fwctl_init();
+	if (lpc_bootrom()) {
+		error = fwctl_init();
+		if (error) {
+			perror("bhyve fwctl initialization error");
+			exit(4);
+		}
+	}
 
 	/*
 	 * Change the proc title to include the VM name.
