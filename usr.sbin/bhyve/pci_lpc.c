@@ -103,6 +103,7 @@ lpc_device_parse(const char *opts)
 	lpcdev = strsep(&str, ",");
 	if (lpcdev != NULL) {
 		if (strcasecmp(lpcdev, "bootrom") == 0) {
+			nvlist_t *nvl = find_config_node("lpc");
 			romfile = strsep(&str, ",");
 			if (romfile == NULL) {
 				errx(4, "invalid bootrom option \"%s\"", opts);
@@ -114,7 +115,7 @@ lpc_device_parse(const char *opts)
 				if (strchr(varfile, '=') == NULL)
 					set_config_value("lpc.bootvars", varfile);
 				else
-					pci_parse_legacy_config(nvl, str);
+					pci_parse_legacy_config(nvl, varfile);
 			}
 
 			/* use qemu as default fwcfg */
@@ -164,13 +165,13 @@ const char *
 lpc_bootrom(void)
 {
 
-	return (get_config_value("lpc.bootrom.code"));
+	return (get_config_value("lpc.bootrom"));
 }
 
 const char *
 lpc_fwcfg(void)
 {
-	return (get_config_value("lpc.bootrom.fwcfg"));
+	return (get_config_value("lpc.fwcfg"));
 }
 
 static void
