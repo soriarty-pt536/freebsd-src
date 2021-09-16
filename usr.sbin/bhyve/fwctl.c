@@ -472,16 +472,9 @@ fwctl_inb(void)
 static void
 fwctl_outw(uint16_t val)
 {
-	switch (be_state) {
-	case IDENT_WAIT:
-		if (val == 0) {
-			be_state = IDENT_SEND;
-			ident_idx = 0;
-		}
-		break;
-	default:
-		/* ignore */
-		break;
+	if (val == 0) {
+		be_state = IDENT_SEND;
+		ident_idx = 0;
 	}
 }
 
