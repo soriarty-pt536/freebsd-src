@@ -545,6 +545,16 @@ cfginitbar(struct vmctx *ctx, struct passthru_softc *sc)
 		sc->psc_bar[i].addr = base;
 		sc->psc_bar[i].lobits = 0;
 
+		if (i == 0 &&
+		    read_config(&sc->psc_sel, PCIR_VENDOR, 2) ==
+			PCI_VENDOR_NVIDIA &&
+		    read_config(&sc->psc_sel, PCIR_CLASS, 2) == PCIC_DISPLAY) {
+			if (size < 0x88000) {
+				warnx("Invalid BAR size for Nvidia device");
+				return (-1);
+			}
+		}
+
 		/* Allocate the BAR in the guest I/O or MMIO space */
 		error = pci_emul_alloc_bar(pi, i, bartype, size);
 		if (error)
@@ -896,6 +906,11 @@ passthru_init(struct vmctx *ctx, struct pci_devinst *pi, char *opts)
 		 passthru_cfgread_default, passthru_cfgwrite_default)) != 0)
 		goto done;
 
+	/* copy PCI header to virtual PCI space */
+	for (uint32_t i = 0; i < 0x3E; ++i) {
+		pci_set_cfgdata8(pi, i, read_config(&sc->psc_sel, i, 1));
+	}
+
 	/*
 	 * init_quirks may modify PCI register protection. Additionally, it may
 	 * fetch a ROM for a device.
@@ -964,6 +979,13 @@ passthru_cfgread(struct vmctx *ctx, int vcpu, struct pci_devinst *pi,
 {
 	struct passthru_softc *const sc = pi->pi_arg;
 
+	if (coff >= PCI_REGMAX) {
+		warnx("%s (%d/%d/%d): Invalid offset %x", __func__, pi->pi_bus,
+		    pi->pi_slot, pi->pi_func, coff);
+		*rv = 0xFFFFFFFF;
+		return (-1);
+	}
+
 	return sc->psc_pcir_rhandler[coff](ctx, vcpu, pi, coff, bytes, rv);
 }
 
@@ -1014,6 +1036,12 @@ passthru_cfgwrite(struct vmctx *ctx, int vcpu, struct pci_devinst *pi,
 		  int coff, int bytes, uint32_t val)
 {
 	struct passthru_softc *const sc = pi->pi_arg;
+
+	if (coff >= PCI_REGMAX) {
+		warnx("%s (%d/%d/%d): Invalid offset %x", __func__, pi->pi_bus,
+		    pi->pi_slot, pi->pi_func, coff);
+		return (-1);
+	}
 
 	return sc->psc_pcir_whandler[coff](ctx, vcpu, pi, coff, bytes, val);
 }
@@ -1114,6 +1142,10 @@ passthru_write(struct vmctx *ctx, int vcpu, struct pci_devinst *pi, int baridx,
 
 	if (baridx == pci_msix_table_bar(pi)) {
 		msix_table_write(ctx, vcpu, sc, offset, size, value);
+	} else if (baridx == 0 &&
+	    pci_get_cfgdata16(pi, PCIR_VENDOR) == PCI_VENDOR_NVIDIA &&
+	    pci_get_cfgdata8(pi, PCIR_CLASS) == PCIC_DISPLAY) {
+		passthru_cfgwrite(ctx, vcpu, pi, offset - 0x88000, size, value);
 	} else {
 		assert(pi->pi_bar[baridx].type == PCIBAR_IO);
 		bzero(&pio, sizeof(struct iodev_pio_req));
@@ -1138,6 +1170,10 @@ passthru_read(struct vmctx *ctx, int vcpu, struct pci_devinst *pi, int baridx,
 
 	if (baridx == pci_msix_table_bar(pi)) {
 		val = msix_table_read(sc, offset, size);
+	} else if (baridx == 0 &&
+	    pci_get_cfgdata16(pi, PCIR_VENDOR) == PCI_VENDOR_NVIDIA &&
+	    pci_get_cfgdata8(pi, PCIR_CLASS) == PCIC_DISPLAY) {
+		passthru_cfgread(ctx, vcpu, pi, offset - 0x88000, size, (uint32_t *)&val);
 	} else {
 		assert(pi->pi_bar[baridx].type == PCIBAR_IO);
 		bzero(&pio, sizeof(struct iodev_pio_req));
@@ -1211,6 +1247,52 @@ passthru_mmio_addr(struct vmctx *ctx, struct pci_devinst *pi, int baridx,
 	struct passthru_softc *sc;
 
 	sc = pi->pi_arg;
+
+	if (pci_get_cfgdata16(pi, PCIR_VENDOR) == PCI_VENDOR_NVIDIA &&
+	    pci_get_cfgdata8(pi, PCIR_CLASS) == PCIC_DISPLAY && baridx == 0) {
+		uint64_t gpa = address;
+		uint64_t len = 0x880000;
+		uint64_t hpa = sc->psc_bar[baridx].addr;
+
+		if (!enabled) {
+			if (vm_unmap_pptdev_mmio(ctx, sc->psc_sel.pc_bus,
+				sc->psc_sel.pc_dev, sc->psc_sel.pc_func, gpa,
+				len) != 0) {
+				warnx(
+				    "pci_passthru: vm_unmap_pptdev_mmio nvidia low failed");
+			}
+		} else {
+			if (vm_map_pptdev_mmio(ctx, sc->psc_sel.pc_bus,
+				sc->psc_sel.pc_dev, sc->psc_sel.pc_func, gpa,
+				len, hpa) != 0) {
+				warnx(
+				    "pci_passthru: vm_map_pptdev_mmio nvidia low failed");
+			}
+		}
+
+		gpa += 0x880000 + 0x1000;
+		hpa += 0x880000 + 0x1000;
+		len = sc->psc_bar[baridx].size - (0x880000 + 0x1000);
+
+		if (!enabled) {
+			if (vm_unmap_pptdev_mmio(ctx, sc->psc_sel.pc_bus,
+				sc->psc_sel.pc_dev, sc->psc_sel.pc_func, gpa,
+				len) != 0) {
+				warnx(
+				    "pci_passthru: vm_unmap_pptdev_mmio nvidia low failed");
+			}
+		} else {
+			if (vm_map_pptdev_mmio(ctx, sc->psc_sel.pc_bus,
+				sc->psc_sel.pc_dev, sc->psc_sel.pc_func, gpa,
+				len, hpa) != 0) {
+				warnx(
+				    "pci_passthru: vm_map_pptdev_mmio nvidia low failed");
+			}
+		}
+
+		return;
+	}
+
 	if (!enabled) {
 		if (vm_unmap_pptdev_mmio(ctx, sc->psc_sel.pc_bus,
 					 sc->psc_sel.pc_dev,
