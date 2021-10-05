@@ -146,6 +146,21 @@ struct vm_pptdev_mmio {
 	size_t		len;
 };
 
+/* second level address translation */
+enum slat_op_type {
+	VM_MAP_MMIO,
+	VM_UNMAP_MMIO,
+	VM_WIRE_GPA,
+	VM_UNWIRE_GPA
+};
+
+struct vm_slat_op {
+	vm_paddr_t gpa;
+	vm_paddr_t len;
+	vm_paddr_t hpa;
+	enum slat_op_type type;
+};
+
 struct vm_pptdev_msi {
 	int		vcpu;
 	int		bus;
@@ -309,6 +324,7 @@ enum {
 	IOCNUM_PPTDEV_MSIX = 44,
 	IOCNUM_PPTDEV_DISABLE_MSIX = 45,
 	IOCNUM_UNMAP_PPTDEV_MMIO = 46,
+	IOCNUM_MODIFY_SLAT = 48,
 
 	/* statistics */
 	IOCNUM_VM_STATS = 50, 
@@ -427,6 +443,8 @@ enum {
 	_IOW('v', IOCNUM_PPTDEV_DISABLE_MSIX, struct vm_pptdev)
 #define	VM_UNMAP_PPTDEV_MMIO \
 	_IOW('v', IOCNUM_UNMAP_PPTDEV_MMIO, struct vm_pptdev_mmio)
+#define VM_MODIFY_SLAT \
+	_IOW('v', IOCNUM_MODIFY_SLAT, struct vm_slat_op)
 #define VM_INJECT_NMI \
 	_IOW('v', IOCNUM_INJECT_NMI, struct vm_nmi)
 #define	VM_STATS \

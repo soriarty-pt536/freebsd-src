@@ -373,6 +373,7 @@ vmmdev_ioctl(struct cdev *cdev, u_long cmd, caddr_t data, int fflag,
 	struct vm_capability *vmcap;
 	struct vm_pptdev *pptdev;
 	struct vm_pptdev_mmio *pptmmio;
+	struct vm_slat_op *slat_op;
 	struct vm_pptdev_msi *pptmsi;
 	struct vm_pptdev_msix *pptmsix;
 	struct vm_nmi *vmnmi;
@@ -453,6 +454,7 @@ vmmdev_ioctl(struct cdev *cdev, u_long cmd, caddr_t data, int fflag,
 	case VM_MMAP_MEMSEG:
 	case VM_MUNMAP_MEMSEG:
 	case VM_REINIT:
+	case VM_MODIFY_SLAT:
 		/*
 		 * ioctls that operate on the entire virtual machine must
 		 * prevent all vcpus from running.
@@ -539,6 +541,26 @@ vmmdev_ioctl(struct cdev *cdev, u_long cmd, caddr_t data, int fflag,
 		pptmmio = (struct vm_pptdev_mmio *)data;
 		error = ppt_unmap_mmio(sc->vm, pptmmio->bus, pptmmio->slot,
 				       pptmmio->func, pptmmio->gpa, pptmmio->len);
+		break;
+	case VM_MODIFY_SLAT:
+		slat_op = (struct vm_slat_op *)data;
+		switch (slat_op->type) {
+		case VM_MAP_MMIO:
+			error = vm_map_mmio(sc->vm, slat_op->gpa, slat_op->len,
+			    slat_op->hpa);
+			break;
+		case VM_UNMAP_MMIO:
+			error = vm_unmap_mmio(sc->vm, slat_op->gpa,
+			    slat_op->len);
+			break;
+		case VM_WIRE_GPA:
+			error = vm_wire_gpa(sc->vm, slat_op->gpa, slat_op->len);
+			break;
+		case VM_UNWIRE_GPA:
+			error = vm_unwire_gpa(sc->vm, slat_op->gpa,
+			    slat_op->len);
+			break;
+		}
 		break;
 	case VM_BIND_PPTDEV:
 		pptdev = (struct vm_pptdev *)data;
