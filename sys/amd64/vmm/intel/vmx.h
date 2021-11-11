@@ -121,6 +121,14 @@ enum {
 	GUEST_MSR_NUM		/* must be the last enumeration */
 };
 
+#define VMM_MTRR_FIXED_NUM	11
+#define VMM_MTRR_VARIABLE_NUM	10
+struct vmxmtrr {
+	uint64_t	def_type;
+	uint64_t	fixed[VMM_MTRR_FIXED_NUM];
+	uint64_t	var[VMM_MTRR_VARIABLE_NUM];
+};
+
 /* virtual machine softc */
 struct vmx {
 	struct vmcs	vmcs[VM_MAXCPU];	/* one vmcs per virtual cpu */
@@ -134,6 +142,7 @@ struct vmx {
 	uint64_t	eptp;
 	struct vm	*vm;
 	long		eptgen[MAXCPU];		/* cached pmap->pm_eptgen */
+	struct vmxmtrr  mtrr[VM_MAXCPU];
 };
 CTASSERT((offsetof(struct vmx, vmcs) & PAGE_MASK) == 0);
 CTASSERT((offsetof(struct vmx, msr_bitmap) & PAGE_MASK) == 0);

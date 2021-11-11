@@ -244,6 +244,64 @@ pat_valid(uint64_t val)
 	return (true);
 }
 
+static uint64_t
+vmx_rdmtrr(struct vmx *vmx, int vcpuid, u_int num)
+{
+	struct vmxmtrr *vmt = &vmx->mtrr[vcpuid];
+	uint64_t ret = 0;
+
+	switch (num) {
+	case MSR_MTRRdefType:
+		ret = vmt->def_type;
+		break;
+	case MSR_MTRRVarBase ... MSR_MTRRVarBase +  (VMM_MTRR_VARIABLE_NUM * 2) - 1:
+		ret = vmt->var[num - MSR_MTRRVarBase];
+		break;
+        case MSR_MTRR64kBase:
+		ret = vmt->fixed[0];
+		break;
+	case MSR_MTRR4kBase ... MSR_MTRR4kBase + 8:
+		ret = vmt->fixed[1 + (num - MSR_MTRR4kBase)];
+		break;
+        case MSR_MTRR16kBase ... MSR_MTRR16kBase + 1:
+		ret = vmt->fixed[9 + (num - MSR_MTRR16kBase)];
+		break;
+	default:
+		break;
+	}
+
+	return (ret);
+}
+
+static int
+vmx_wrmtrr(struct vmx *vmx, int vcpuid, u_int num, uint64_t val)
+{
+	struct vmxmtrr *vmt = &vmx->mtrr[vcpuid];
+
+	/* XXX need to check reserved fields */
+	switch (num) {
+	case MSR_MTRRdefType:
+		vmt->def_type = val;
+		break;
+	case MSR_MTRRVarBase ... MSR_MTRRVarBase +  (VMM_MTRR_VARIABLE_NUM * 2) - 1:
+		vmt->var[num - MSR_MTRRVarBase] = val;
+		break;
+        case MSR_MTRR64kBase:
+		vmt->fixed[0] = val;
+		break;
+	case MSR_MTRR4kBase ... MSR_MTRR4kBase + 7:
+		vmt->fixed[1 + (num - MSR_MTRR4kBase)] = val;
+		break;
+        case MSR_MTRR16kBase ... MSR_MTRR16kBase + 1:
+		vmt->fixed[9 + (num - MSR_MTRR16kBase)] = val;
+		break;
+	default:
+		break;
+	}
+
+	return (0);
+}
+
 void
 vmx_msr_init(void)
 {
@@ -424,11 +482,14 @@ vmx_rdmsr(struct vmx *vmx, int vcpuid, u_int num, uint64_t *val, bool *retu)
 		*val = 0;
 		break;
 	case MSR_MTRRcap:
+		*val = MTRR_CAP_WC | MTRR_CAP_FIXED | VMM_MTRR_VARIABLE_NUM;
+		break;
 	case MSR_MTRRdefType:
 	case MSR_MTRR4kBase ... MSR_MTRR4kBase + 8:
 	case MSR_MTRR16kBase ... MSR_MTRR16kBase + 1:
 	case MSR_MTRR64kBase:
-		*val = 0;
+	case MSR_MTRRVarBase ... MSR_MTRRVarBase +  (VMM_MTRR_VARIABLE_NUM * 2) - 1:
+		*val = vmx_rdmtrr(vmx, vcpuid, num);
 		break;
 	case MSR_IA32_MISC_ENABLE:
 		*val = misc_enable;
@@ -468,10 +529,13 @@ vmx_wrmsr(struct vmx *vmx, int vcpuid, u_int num, uint64_t val, bool *retu)
 		vm_inject_gp(vmx->vm, vcpuid);
 		break;
 	case MSR_MTRRdefType:
-	case MSR_MTRR4kBase ... MSR_MTRR4kBase + 8:
+	case MSR_MTRR4kBase ... MSR_MTRR4kBase + 7:
 	case MSR_MTRR16kBase ... MSR_MTRR16kBase + 1:
 	case MSR_MTRR64kBase:
-		break;		/* Ignore writes */
+	case MSR_MTRRVarBase ... MSR_MTRRVarBase +  (VMM_MTRR_VARIABLE_NUM * 2) - 1:
+		/* XXX inject GP on error return */
+		(void) vmx_wrmtrr(vmx, vcpuid, num, val);
+		break;
 	case MSR_IA32_MISC_ENABLE:
 		changed = val ^ misc_enable;
 		/*
