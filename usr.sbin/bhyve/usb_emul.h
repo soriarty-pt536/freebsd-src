@@ -166,7 +166,7 @@ struct usb_data_xfer_block {
 };
 
 struct usb_data_xfer {
-	struct usb_data_xfer_block data[USB_MAX_XFER_BLOCKS];
+	struct usb_data_xfer_block *data;
 	struct usb_dev_req **reqs;
 	struct usb_device_request *ureq; 	/* setup ctl request */
 	int	ndata;				/* # of data items */
@@ -220,7 +220,7 @@ enum USB_ERRCODE {
 		} while (0)
 
 #define	USB_DATA_XFER_RESET(x)	do {					\
-			memset((x)->data, 0, sizeof((x)->data));	\
+			memset((x)->data, 0, (x)->max_blk_cnt * sizeof(*((x)->data)));	\
 			(x)->ndata = 0;					\
 			(x)->head = (x)->tail = 0;			\
 		} while (0)

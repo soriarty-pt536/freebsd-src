@@ -1093,6 +1093,9 @@ pci_xhci_alloc_usb_xfer(struct pci_xhci_dev_emu *dev, int epid)
 		return NULL;
 	}
 
+	if (dev->xsc->tablet)
+		max_blk_cnt = USB_MAX_XFER_BLOCKS;
+
 	xfer = calloc(1, sizeof(struct usb_data_xfer));
 	if (!xfer) {
 		return NULL;
@@ -1103,6 +1106,10 @@ pci_xhci_alloc_usb_xfer(struct pci_xhci_dev_emu *dev, int epid)
 		goto fail;
 	}
 
+	xfer->data = calloc(max_blk_cnt, sizeof(struct usb_data_xfer_block));
+	if (!xfer->data)
+		goto fail;
+
 	DPRINTF(("allocate %d blocks for epid %d type %d",
 			max_blk_cnt, epid, type));
 
@@ -1111,6 +1118,8 @@ pci_xhci_alloc_usb_xfer(struct pci_xhci_dev_emu *dev, int epid)
 	xfer->epid = epid;
 	return xfer;
 fail:
+	if (xfer->data)
+		free(xfer->data);
 	if (xfer->reqs)
 		free(xfer->reqs);
 	free(xfer);
@@ -1121,8 +1130,17 @@ fail:
 static void
 pci_xhci_free_usb_xfer(struct usb_data_xfer *xfer)
 {
+	int i;
+
 	if (!xfer)
 		return;
+
+	for (i = 0; i < xfer->max_blk_cnt; i++) {
+		if(xfer->reqs[i]) {
+			free(xfer->reqs[i]->buffer);
+			free(xfer->reqs[i]);
+		}
+	}
 
 	free(xfer->data);
 	free(xfer->reqs);
@@ -2291,13 +2309,17 @@ pci_xhci_try_usb_xfer(struct pci_xhci_softc *sc,
 			if (USB_DATA_GET_ERRCODE(&xfer->data[xfer->head]) ==
 			    USB_NAK)
 				err = XHCI_TRB_ERROR_SUCCESS;
-		} else {
+		} else if (dev->dev_ue->ue_devtype == USB_DEV_STATIC) {
+			/*
+			 * USB pmapper should not get in here, because, if we
+			 * generate interrupt during transfer and the XHCI ctrl
+			 * does not see it, it will be reset
+			 */
 			err = pci_xhci_xfer_complete(sc, xfer, slot, epid,
 			                             &do_intr);
 			if (err == XHCI_TRB_ERROR_SUCCESS && do_intr) {
 				pci_xhci_assert_interrupt(sc);
 			}
-
 
 			/* XXX should not do it if error? */
 			USB_DATA_XFER_RESET(xfer);
@@ -2305,7 +2327,6 @@ pci_xhci_try_usb_xfer(struct pci_xhci_softc *sc,
 	}
 
 	USB_DATA_XFER_UNLOCK(xfer);
-
 
 	return (err);
 }
