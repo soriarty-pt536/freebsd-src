@@ -459,11 +459,32 @@ pci_lpc_init(struct vmctx *ctx, struct pci_devinst *pi, nvlist_t *nvl)
 	if (lpc_init(ctx) != 0)
 		return (-1);
 
+	char value[16];
+
+	snprintf(value, sizeof(value), "0x%04x", LPC_VENDOR);
+	set_config_value_if_unset("lpc.pcir.vendor", value);
+	snprintf(value, sizeof(value), "0x%04x", LPC_DEV);
+	set_config_value_if_unset("lpc.pcir.device", value);
+	snprintf(value, sizeof(value), "0x%02x", 0);
+	set_config_value_if_unset("lpc.pcir.revid", 0);
+	snprintf(value, sizeof(value), "0x%04x", 0);
+	set_config_value_if_unset("lpc.pcir.subvendor", 0);
+	snprintf(value, sizeof(value), "0x%04x", 0);
+	set_config_value_if_unset("lpc.pcir.subdevice", 0);
+
 	/* initialize config space */
-	pci_set_cfgdata16(pi, PCIR_DEVICE, LPC_DEV);
-	pci_set_cfgdata16(pi, PCIR_VENDOR, LPC_VENDOR);
+	pci_set_cfgdata16(pi, PCIR_VENDOR,
+	    strtol(get_config_value("lpc.pcir.vendor"), NULL, 16));
+	pci_set_cfgdata16(pi, PCIR_DEVICE,
+	    strtol(get_config_value("lpc.pcir.device"), NULL, 16));
 	pci_set_cfgdata8(pi, PCIR_CLASS, PCIC_BRIDGE);
 	pci_set_cfgdata8(pi, PCIR_SUBCLASS, PCIS_BRIDGE_ISA);
+	pci_set_cfgdata8(pi, PCIR_REVID,
+	    strtol(get_config_value("lpc.pcir.revid"), NULL, 16));
+	pci_set_cfgdata16(pi, PCIR_SUBVEND_0,
+	    strtol(get_config_value("lpc.pcir.subvendor"), NULL, 16));
+	pci_set_cfgdata16(pi, PCIR_SUBDEV_0,
+	    strtol(get_config_value("lpc.pcir.subdevice"), NULL, 16));
 
 	lpc_bridge = pi;
 
