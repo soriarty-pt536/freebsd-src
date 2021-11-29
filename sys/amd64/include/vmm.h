@@ -741,6 +741,10 @@ struct vm_exit {
 	} u;
 };
 
+enum vm_acpi_device_info_type {
+	VM_ACPI_DEVICE_INFO_CRS,
+};
+
 /* APIs to inject faults into the guest */
 void vm_inject_fault(void *vm, int vcpuid, int vector, int errcode_valid,
     int errcode);
