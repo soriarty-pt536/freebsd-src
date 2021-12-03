@@ -69,7 +69,7 @@ SYSRES_IO(NMISC_PORT, 1);
 static struct pci_devinst *lpc_bridge;
 
 static const char *romfile;
-static const char *fwcfg = "bhyve";
+static const char *fwcfg = "qemu";
 
 #define	LPC_UART_NUM	4
 static struct lpc_uart_softc {
