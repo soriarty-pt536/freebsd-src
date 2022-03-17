@@ -80,4 +80,17 @@ enum vm_cpuid_capability {
  * and 'false' otherwise.
  */
 bool vm_cpuid_capability(struct vm *vm, int vcpuid, enum vm_cpuid_capability);
+
+#define VMM_MTRR_VAR_MAX 10
+struct vm_mtrr {
+	uint64_t def_type;
+	uint64_t fixed4k[8];
+	uint64_t fixed16k[2];
+	uint64_t fixed64k;
+	uint64_t var[VMM_MTRR_VAR_MAX];
+};
+
+int vm_rdmtrr(struct vm_mtrr *mtrr, u_int num, uint64_t *val);
+int vm_wrmtrr(struct vm_mtrr *mtrr, u_int num, uint64_t val);
+
 #endif
