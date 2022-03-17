@@ -1108,9 +1108,9 @@ main(int argc, char *argv[])
 	memflags = 0;
 
 #ifdef BHYVE_SNAPSHOT
-	optstr = "aehuwxACDHIPSWYp:G:c:s:m:l:U:r:";
+	optstr = "aehuwxACDHIPSWYp:f:G:c:s:m:l:U:r:";
 #else
-	optstr = "aehuwxACDHIPSWYp:G:c:s:m:l:U:";
+	optstr = "aehuwxACDHIPSWYp:f:G:c:s:m:l:U:";
 #endif
 	while ((c = getopt(argc, argv, optstr)) != -1) {
 		switch (c) {
@@ -1137,6 +1137,11 @@ main(int argc, char *argv[])
 			break;
 		case 'C':
 			memflags |= VM_MEM_F_INCORE;
+			break;
+		case 'f':
+			if (qemu_fwcfg_parse_cmdline_arg(optarg) != 0) {
+				exit(1);
+			}
 			break;
 		case 'G':
 			if (optarg[0] == 'w') {
