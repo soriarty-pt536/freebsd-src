@@ -51,6 +51,6 @@ struct ctl {
 	};							\
 	DATA_SET(ctl_set, __CONCAT(__ctl, __LINE__))
 
-void	fwctl_init(void);
+int	fwctl_init(void);
 
 #endif /* _FWCTL_H_ */
