@@ -69,6 +69,7 @@ SYSRES_IO(NMISC_PORT, 1);
 static struct pci_devinst *lpc_bridge;
 
 static const char *romfile;
+static const char *fwcfg = "bhyve";
 
 #define	LPC_UART_NUM	4
 static struct lpc_uart_softc {
@@ -99,8 +100,22 @@ lpc_device_parse(const char *opts)
 	lpcdev = strsep(&str, ",");
 	if (lpcdev != NULL) {
 		if (strcasecmp(lpcdev, "bootrom") == 0) {
-			romfile = str;
-			error = 0;
+			const char *xopt;
+			while ((xopt = strsep(&str, ",")) != NULL) {
+				if (strncmp(xopt,
+					"fwcfg=", sizeof("fwcfg=") - 1) == 0) {
+					fwcfg = xopt + (sizeof("fwcfg=") - 1);
+					continue;
+				} else if (strchr(xopt, '=') == NULL) {
+					romfile = xopt;
+					error = 0;
+					continue;
+				}
+
+				error = -EFAULT;
+				break;
+			}
+
 			goto done;
 		}
 		for (unit = 0; unit < LPC_UART_NUM; unit++) {
@@ -147,6 +162,12 @@ lpc_bootrom(void)
 {
 
 	return (romfile);
+}
+
+const char *
+lpc_fwcfg(void)
+{
+	return (fwcfg);
 }
 
 static void
