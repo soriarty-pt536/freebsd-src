@@ -662,6 +662,15 @@ pci_emul_alloc_bar(struct pci_devinst *pdi, int idx, enum pcibar_type type,
 	pdi->pi_bar[idx].type = type;
 	pdi->pi_bar[idx].addr = addr;
 	pdi->pi_bar[idx].size = size;
+	/*
+	 * passthru devices are using same lobits as physical device they set
+	 * this property
+	 */
+	if (pdi->pi_bar[idx].lobits != 0) {
+		lobits = pdi->pi_bar[idx].lobits;
+	} else {
+		pdi->pi_bar[idx].lobits = lobits;
+	}
 
 	/* Initialize the BAR register in config space */
 	bar = (addr & mask) | lobits;
@@ -1869,7 +1878,7 @@ pci_cfgrw(struct vmctx *ctx, int vcpu, int in, int bus, int slot, int func,
 			case PCIBAR_IO:
 				addr = *eax & mask;
 				addr &= 0xffff;
-				bar = addr | PCIM_BAR_IO_SPACE;
+				bar = addr | pi->pi_bar[idx].lobits;
 				/*
 				 * Register the new BAR value for interception
 				 */
@@ -1880,7 +1889,7 @@ pci_cfgrw(struct vmctx *ctx, int vcpu, int in, int bus, int slot, int func,
 				break;
 			case PCIBAR_MEM32:
 				addr = bar = *eax & mask;
-				bar |= PCIM_BAR_MEM_SPACE | PCIM_BAR_MEM_32;
+				bar |= pi->pi_bar[idx].lobits;
 				if (addr != pi->pi_bar[idx].addr) {
 					update_bar_address(pi, addr, idx,
 							   PCIBAR_MEM32);
@@ -1888,8 +1897,7 @@ pci_cfgrw(struct vmctx *ctx, int vcpu, int in, int bus, int slot, int func,
 				break;
 			case PCIBAR_MEM64:
 				addr = bar = *eax & mask;
-				bar |= PCIM_BAR_MEM_SPACE | PCIM_BAR_MEM_64 |
-				       PCIM_BAR_MEM_PREFETCH;
+				bar |= pi->pi_bar[idx].lobits;
 				if (addr != (uint32_t)pi->pi_bar[idx].addr) {
 					update_bar_address(pi, addr, idx,
 							   PCIBAR_MEM64);
