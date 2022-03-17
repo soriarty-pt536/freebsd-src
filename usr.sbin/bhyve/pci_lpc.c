@@ -32,13 +32,24 @@
 #include <sys/cdefs.h>
 __FBSDID("$FreeBSD$");
 
+#ifndef WITHOUT_CAPSICUM
+#include <sys/capsicum.h>
+#endif
 #include <sys/types.h>
+#include <sys/pciio.h>
 #include <machine/vmm.h>
 #include <machine/vmm_snapshot.h>
 
+#ifndef WITHOUT_CAPSICUM
+#include <capsicum_helpers.h>
+#endif
+#include <err.h>
+#include <errno.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sysexits.h>
 
 #include <vmmapi.h>
 
@@ -83,6 +94,29 @@ static struct lpc_uart_softc {
 static const char *lpc_uart_names[LPC_UART_NUM] = { "COM1", "COM2", "COM3", "COM4" };
 
 static bool pctestdev_present;
+
+#ifndef _PATH_DEVPCI
+#define _PATH_DEVPCI "/dev/pci"
+#endif
+
+static int pcifd = -1;
+
+static uint32_t
+read_config(const struct pcisel *const sel, const long reg, const int width)
+{
+	struct pci_io pi;
+	pi.pi_sel.pc_domain = sel->pc_domain;
+	pi.pi_sel.pc_bus = sel->pc_bus;
+	pi.pi_sel.pc_dev = sel->pc_dev;
+	pi.pi_sel.pc_func = sel->pc_func;
+	pi.pi_reg = reg;
+	pi.pi_width = width;
+
+	if (ioctl(pcifd, PCIOCREAD, &pi) < 0)
+		return (0);
+
+	return (pi.pi_data);
+}
 
 /*
  * LPC device configuration is in the following form:
@@ -466,6 +500,48 @@ pci_lpc_init(struct vmctx *ctx, struct pci_devinst *pi, char *opts)
 	pci_set_cfgdata16(pi, PCIR_VENDOR, LPC_VENDOR);
 	pci_set_cfgdata8(pi, PCIR_CLASS, PCIC_BRIDGE);
 	pci_set_cfgdata8(pi, PCIR_SUBCLASS, PCIS_BRIDGE_ISA);
+
+	pcifd = open(_PATH_DEVPCI, O_RDWR, 0);
+	if (pcifd < 0) {
+		warn("failed to open %s", _PATH_DEVPCI);
+		return (-1);
+	}
+
+#ifndef WITHOUT_CAPSICUM
+	cap_rights_t pcifd_rights;
+	cap_rights_init(&pcifd_rights, CAP_IOCTL, CAP_READ);
+
+	const cap_ioctl_t pcifd_ioctls[] = { PCIOCREAD };
+
+	if (caph_rights_limit(pcifd, &pcifd_rights) == -1)
+		errx(EX_OSERR, "Unable to apply rights for sandbox");
+	if (caph_ioctls_limit(pcifd, pcifd_ioctls, nitems(pcifd_ioctls)) == -1)
+		errx(EX_OSERR, "Unable to apply rights for sandbox");
+#endif
+
+	/* on Intel systems lpc is always connected to 0:1f.0 */
+	const struct pcisel sel = { .pc_dev = 0x1f };
+
+	if (read_config(&sel, PCIR_VENDOR, 2) == PCI_VENDOR_INTEL) {
+		/*
+		 * The VID, DID, REVID, SUBVID and SUBDID of igd-lpc need to be
+		 * aligned with the physical ones. Without these physical
+		 * values, GVT-d GOP driver couldn't work.
+		 */
+		pci_set_cfgdata16(pi, PCIR_DEVICE,
+		    read_config(&sel, PCIR_DEVICE, 2));
+		pci_set_cfgdata16(pi, PCIR_VENDOR,
+		    read_config(&sel, PCIR_VENDOR, 2));
+		pci_set_cfgdata8(pi, PCIR_REVID,
+		    read_config(&sel, PCIR_REVID, 1));
+		pci_set_cfgdata16(pi, PCIR_SUBVEND_0,
+		    read_config(&sel, PCIR_SUBVEND_0, 2));
+		pci_set_cfgdata16(pi, PCIR_SUBDEV_0,
+		    read_config(&sel, PCIR_SUBDEV_0, 2));
+	}
+
+	close(pcifd);
+	pcifd = -1;
 
 	lpc_bridge = pi;
 
