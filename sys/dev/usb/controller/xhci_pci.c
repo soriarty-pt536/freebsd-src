@@ -1,7 +1,7 @@
 /*-
  * SPDX-License-Identifier: BSD-2-Clause-FreeBSD
  *
- * Copyright (c) 2010 Hans Petter Selasky. All rights reserved.
+ * Copyright (c) 2010-2022 Hans Petter Selasky
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -64,6 +64,7 @@ __FBSDID("$FreeBSD$");
 
 #define	PCI_XHCI_VENDORID_AMD		0x1022
 #define	PCI_XHCI_VENDORID_INTEL		0x8086
+#define	PCI_XHCI_VENDORID_VMWARE	0x15ad
 
 static device_probe_t xhci_pci_probe;
 static device_detach_t xhci_pci_detach;
@@ -85,9 +86,7 @@ static device_method_t xhci_device_methods[] = {
 DEFINE_CLASS_0(xhci, xhci_pci_driver, xhci_device_methods,
     sizeof(struct xhci_softc));
 
-static devclass_t xhci_devclass;
-
-DRIVER_MODULE(xhci, pci, xhci_pci_driver, xhci_devclass, NULL, NULL);
+DRIVER_MODULE(xhci, pci, xhci_pci_driver, NULL, NULL);
 MODULE_DEPEND(xhci, usb, 1, 1, 1);
 
 static const char *
@@ -111,6 +110,10 @@ xhci_pci_match(device_t self)
 	case 0x78141022:
 	case 0x79141022:
 		return ("AMD FCH USB 3.0 controller");
+
+	case 0x077815ad:
+	case 0x077915ad:
+		return ("VMware USB 3.0 controller");
 
 	case 0x145f1d94:
 		return ("Hygon USB 3.0 controller");
@@ -287,6 +290,10 @@ xhci_pci_attach(device_t self)
 	sc->sc_io_size = rman_get_size(sc->sc_io_res);
 
 	switch (pci_get_devid(self)) {
+	case 0x10091b73:	/* Fresco Logic FL1009 USB3.0 xHCI Controller */
+	case 0x8241104c:	/* TUSB73x0 USB3.0 xHCI Controller */
+		sc->sc_no_deconfigure = 1;
+		break;
 	case 0x01941033:	/* NEC uPD720200 USB 3.0 controller */
 	case 0x00141912:	/* NEC uPD720201 USB 3.0 controller */
 		/* Don't use 64-bit DMA on these controllers. */
@@ -309,6 +316,8 @@ xhci_pci_attach(device_t self)
 		sc->sc_port_route = &xhci_pci_port_route;
 		sc->sc_imod_default = XHCI_IMOD_DEFAULT_LP;
 		sc->sc_ctlstep = 1;
+		break;
+	default:
 		break;
 	}
 
@@ -381,6 +390,9 @@ xhci_pci_attach(device_t self)
 	case PCI_XHCI_VENDORID_INTEL:
 		strlcpy(sc->sc_vendor, "Intel", sizeof(sc->sc_vendor));
 		break;
+	case PCI_XHCI_VENDORID_VMWARE:
+		strlcpy(sc->sc_vendor, "VMware", sizeof(sc->sc_vendor));
+		break;
 	default:
 		if (bootverbose)
 			device_printf(self, "(New XHCI DeviceId=0x%08x)\n",
@@ -390,7 +402,7 @@ xhci_pci_attach(device_t self)
 		break;
 	}
 
-	if (sc->sc_irq_res != NULL) {
+	if (sc->sc_irq_res != NULL && xhci_use_polling() == 0) {
 		err = bus_setup_intr(self, sc->sc_irq_res, INTR_TYPE_BIO | INTR_MPSAFE,
 		    NULL, (driver_intr_t *)xhci_interrupt, sc, &sc->sc_intr_hdl);
 		if (err != 0) {

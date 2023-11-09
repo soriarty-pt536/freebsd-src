@@ -161,7 +161,7 @@ static int
 nicvf_alloc_q_desc_mem(struct nicvf *nic, struct q_desc_mem *dmem,
     int q_len, int desc_size, int align_bytes)
 {
-	int err, err_dmat;
+	int err, err_dmat __diagused;
 
 	/* Create DMA tag first */
 	err = bus_dma_tag_create(
@@ -231,7 +231,7 @@ dmamem_fail:
 static void
 nicvf_free_q_desc_mem(struct nicvf *nic, struct q_desc_mem *dmem)
 {
-	int err;
+	int err __diagused;
 
 	if ((dmem == NULL) || (dmem->base == NULL))
 		return;
@@ -438,7 +438,7 @@ nicvf_free_rbdr(struct nicvf *nic, struct rbdr *rbdr)
 	struct rbuf_info *rinfo;
 	bus_addr_t buf_addr;
 	int head, tail, idx;
-	int err;
+	int err __diagused;
 
 	qs = nic->qs;
 
@@ -733,7 +733,10 @@ nicvf_cq_intr_handler(struct nicvf *nic, uint8_t cq_idx)
 {
 	struct mbuf *mbuf;
 	struct ifnet *ifp;
-	int processed_cqe, work_done = 0, tx_done = 0;
+	int processed_cqe, tx_done = 0;
+#ifdef DEBUG
+	int work_done = 0;
+#endif
 	int cqe_count, cqe_head;
 	struct queue_set *qs = nic->qs;
 	struct cmp_queue *cq = &qs->cq[cq_idx];
@@ -780,7 +783,9 @@ nicvf_cq_intr_handler(struct nicvf *nic, uint8_t cq_idx)
 				 */
 				goto done;
 			}
+#ifdef DEBUG
 			work_done++;
+#endif
 			break;
 		case CQE_TYPE_SEND:
 			nicvf_snd_pkt_handler(nic, cq, (void *)cq_desc,
@@ -1142,7 +1147,7 @@ nicvf_free_snd_queue(struct nicvf *nic, struct snd_queue *sq)
 {
 	struct queue_set *qs = nic->qs;
 	size_t i;
-	int err;
+	int err __diagused;
 
 	if (sq == NULL)
 		return;

@@ -63,7 +63,9 @@ __FBSDID("$FreeBSD$");
 #include <sys/sx.h>
 #include <sys/priv.h>
 #include <sys/proc.h>
+#ifdef COMPAT_43
 #include <sys/sysent.h>
+#endif
 #include <sys/sysproto.h>
 #include <sys/jail.h>
 #include <sys/racct.h>
@@ -1761,7 +1763,7 @@ p_candebug(struct thread *td, struct proc *p)
 	if ((p->p_flag & P_INEXEC) != 0)
 		return (EBUSY);
 
-	/* Denied explicitely */
+	/* Denied explicitly */
 	if ((p->p_flag2 & P2_NOTRACE) != 0) {
 		error = priv_check(td, PRIV_DEBUG_DENIED);
 		if (error != 0)

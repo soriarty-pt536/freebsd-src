@@ -28,7 +28,7 @@
 .\"	@(#)hier.7	8.1 (Berkeley) 6/5/93
 .\" $FreeBSD$
 .\"
-.Dd December 11, 2021
+.Dd November 1, 2022
 .Dt HIER 7
 .Os
 .Sh NAME
@@ -174,6 +174,13 @@ system administrators as a temporary mount point
 automounted NFS shares;
 see
 .Xr auto_master 5
+.It Pa /nonexistent/
+a non-existent directory;
+by convention, it serves as a home directory
+for special user accounts
+that need no home directory;
+see also
+.Pa /var/empty/
 .It Pa /proc/
 process file system;
 see
@@ -192,13 +199,20 @@ temporary files that are not guaranteed to persist across system reboots
 .It Pa /usr/
 contains the majority of user utilities and applications
 .Pp
-.Bl -tag -width "defaults/" -compact
+.Bl -tag -width "freebsd-dist/" -compact
 .It Pa bin/
 common utilities, programming tools, and applications
 .It Pa compat/
 files needed to support binary compatibility with other operating systems;
 see
 .Xr linux 4
+.It Pa freebsd-dist/
+distribution files
+.Pq like base.txz ;
+see
+.Xr release 7
+and
+.Xr bsdinstall 8
 .It Pa include/
 standard C include files
 .Pp
@@ -351,14 +365,8 @@ shared and archive
 libraries
 .Pp
 .Bl -tag -width Fl -compact
-.It Pa aout/
-a.out archive libraries
 .It Pa compat/
 shared libraries for compatibility
-.Bl -tag -width Fl -compact
-.It Pa aout/
-a.out backward compatibility libraries
-.El
 .It Pa debug/
 standalone debug data for the kernel and base system libraries and binaries
 .It Pa dtrace/
@@ -378,6 +386,8 @@ configuration data
 linker scripts;
 see
 .Xr ld 1
+.It Pa pkgconfig/
+pc files
 .El
 .Pp
 .It Pa libexec/
@@ -426,9 +436,11 @@ and
 .Po mimics
 .Pa /etc Ns Pc .
 .It Pa obj/
-architecture-specific target tree produced by building the
-.Pa /usr/src
-tree
+architecture-specific target tree produced by building
+.Fx
+from source;
+see
+.Xr build 7
 .It Pa ports/
 .Fx
 ports collection; see
@@ -566,6 +578,32 @@ and
 .It Pa scrnmaps/
 console screen maps
 .El
+.It Pa sysroot/
+files necessary for the -sysroot compiler/linker argument to build non-native
+binaries.
+.Bl -tag -width Fl -compact
+.It Pa VERSION/
+files for
+.Fx
+release VERSION.
+By convention,
+.Dq VERSION
+matches
+.Xr uname 1
+.Fl r .
+.Bl -tag -width Fl -compact
+.It Pa MACHINE.MACHINE_ARCH/
+represent the binary ABI for these files.
+.Dq MACHINE
+matches
+.Xr uname 1
+.Fl m .
+.Dq MACHINE_ARCH
+matches
+.Xr uname 1
+.Fl p .
+.El
+.El
 .It Pa tabset/
 tab description files for a variety of terminals; used in
 the termcap file;
@@ -603,127 +641,10 @@ see
 .It Pa src/
 .Fx
 source code; see
-.Xr development 7
-.Pp
-.Bl -tag -width "kerberos5/" -compact
-.It Pa bin/
-source code for files in /bin
-.It Pa cddl/
-utilities covered by the Common Development and Distribution License
-.It Pa contrib/
-source code for contributed software
-.It Pa crypto/
-source code for contributed cryptography software
-.It Pa etc/
-source code for files in
-.Pa /etc
-.It Pa gnu/
-utilities covered by the GNU General Public License
-.It Pa include/
-source code for files in
-.Pa /usr/include
-.It Pa kerberos5/
-build infrastructure for Kerberos version 5
-.It Pa lib/
-source code for files in
-.Pa /lib
-and
-.Pa /usr/lib
-.It Pa libexec/
-source code for files in
-.Pa /usr/libexec
-.It Pa release/
-files required to produce a
-.Fx
-release
-.It Pa rescue/
-source code for files in
-.Pa /rescue
-.It Pa sbin/
-source code for files in
-.Pa /sbin
-.It Pa secure/
-build directory for files in
-.Pa /usr/src/crypto
-.It Pa share/
-source for files in
-.Pa /usr/share
-.It Pa stand/
-boot loader source code
-.It Pa sys/
-kernel source code
-.Bl -tag -width Fl -compact
-.It Pa amd64/
-AMD64 architecture support
-.It Pa arm/
-ARM architecture support
-.It Pa arm64/
-ARMv8 architecture support
-.It Pa cam/
-.Xr cam 4
-and
-.Xr ctl 4
-.It Pa cddl/
-CDDL-licensed optional sources, including ZFS
-and DTrace
-.It Pa ddb/
-.Xr ddb 4
-.It Pa fs/
-most filesystems
-.It Pa dev/
-device drivers
-.It Pa geom/
-.Xr geom 4
-.It Pa i386/
-i386 (32 bit) architecture support
-.It Pa kern/
-main part of the kernel
-.It Pa net80211/
-.Xr net80211 4
-.It Pa netgraph/
-.Xr netgraph 4
-.It Pa netinet/
-.Xr inet 4
-.It Pa netinet6/
-.Xr inet6 4
-.It Pa netipsec/
-.Xr ipsec 4
-.It Pa netpfil/
-.Xr ipfw 4
-and
-.Xr pf 4
-.It Pa opencrypto/
-.Xr crypto 7
-.It Pa powerpc/
-PowerPC/POWER architecture support
-.It Pa riscv/
-RISC-V architecture support
-.It Pa security/
-.Xr audit 4
-and
-.Xr mac 4
-.It Pa sys/
-kernel headers
-.It Pa ufs/
-Unix File System
-.It Pa x86/
-code shared by AMD64 and i386 architectures
-.El
-.It Pa targets/
-support for experimental DIRDEPS_BUILD
-.It Pa tests/
-source code for files in
-.Pa /usr/tests
-.It Pa tools/
-tools used for maintenance and testing of
-.Fx
-.It Pa usr.bin/
-source code for files in
-.Pa /usr/bin
-.It Pa usr.sbin/
-source code for files in
-.Pa /usr/sbin
-.El
+.Xr development 7 .
+The layout of the source tree is described by the top-level
+.Pa README.md
+file.
 .Pp
 .It Pa tests/
 The
@@ -787,6 +708,11 @@ see
 .Pp
 .It Pa db/
 miscellaneous automatically generated system-specific database files
+.Bl -tag -width Fl -compact
+.It Pa freebsd-update/
+.Xr freebsd-update 8
+work directory for temporary files and downloaded updates
+.El
 .It Pa empty/
 empty directory for use by programs that need a specifically empty directory.
 Used for instance by
@@ -830,7 +756,9 @@ system since it was booted
 .Pp
 .Bl -tag -width Fl -compact
 .It Pa bhyve/
-bhyve vm unix domain sockets
+.Xr bhyve 8
+virtual machine
+.Xr unix 4 Ns -domain sockets
 .It Pa ppp/
 writable by the
 .Dq network
@@ -858,7 +786,9 @@ undelivered submission mail queue;
 see
 .Xr sendmail 8
 .It Pa ftp/
-commonly ~ftp; the anonymous ftp root directory
+ftp root directory;
+see
+.Xr ftpd 8
 .It Pa mqueue/
 undelivered mail queue;
 see

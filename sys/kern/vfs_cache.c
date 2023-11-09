@@ -277,7 +277,7 @@ struct	namecache {
 	} n_un;
 	u_char	nc_flag;		/* flag bits */
 	u_char	nc_nlen;		/* length of name */
-	char	nc_name[0];		/* segment name + nul */
+	char	nc_name[];		/* segment name + nul */
 };
 
 /*
@@ -444,10 +444,6 @@ static u_long __exclusive_cache_line	numneg;	/* number of negative entries alloc
 static u_long __exclusive_cache_line	numcache;/* number of cache entries allocated */
 
 struct nchstats	nchstats;		/* cache effectiveness statistics */
-
-static bool __read_mostly cache_rename_add = true;
-SYSCTL_BOOL(_vfs, OID_AUTO, cache_rename_add, CTLFLAG_RW,
-    &cache_rename_add, 0, "");
 
 static u_int __exclusive_cache_line neg_cycle;
 
@@ -1029,7 +1025,7 @@ SYSCTL_PROC(_vfs_cache_param, OID_AUTO, negminpct,
     CTLTYPE_INT | CTLFLAG_MPSAFE | CTLFLAG_RW, NULL, 0, sysctl_negminpct,
     "I", "Negative entry \% of namecache capacity above which automatic eviction is allowed");
 
-#ifdef DIAGNOSTIC
+#ifdef DEBUG_CACHE
 /*
  * Grab an atomic snapshot of the name cache hash chain lengths
  */
@@ -2588,7 +2584,7 @@ out_unlock_free:
  *
  * TODO: this routine is a hack. It blindly removes the old entry, even if it
  * happens to match and it is doing it in an inefficient manner. It was added
- * to accomodate NFS which runs into a case where the target for a given name
+ * to accommodate NFS which runs into a case where the target for a given name
  * may change from under it. Note this does nothing to solve the following
  * race: 2 callers of cache_enter_time_flags pass a different target vnode for
  * the same [dvp, cnp]. It may be argued that code doing this is broken.
@@ -2964,9 +2960,7 @@ cache_vop_rename(struct vnode *fdvp, struct vnode *fvp, struct vnode *tdvp,
 	 * Recode this to reduce relocking and reuse the existing entry (if any)
 	 * instead of just removing it above and allocating a new one here.
 	 */
-	if (cache_rename_add) {
-		cache_enter(tdvp, fvp, tcnp);
-	}
+	cache_enter(tdvp, fvp, tcnp);
 }
 
 void
@@ -3003,6 +2997,15 @@ cache_validate(struct vnode *dvp, struct vnode *vp, struct componentname *cnp)
 		}
 	}
 	mtx_unlock(blp);
+}
+
+void
+cache_assert_no_entries(struct vnode *vp)
+{
+
+	VNPASS(TAILQ_EMPTY(&vp->v_cache_dst), vp);
+	VNPASS(LIST_EMPTY(&vp->v_cache_src), vp);
+	VNPASS(vp->v_cache_dd == NULL, vp);
 }
 #endif
 
@@ -3119,6 +3122,17 @@ vn_getcwd(char *buf, char **retbuf, size_t *buflen)
 	return (error);
 }
 
+/*
+ * Canonicalize a path by walking it forward and back.
+ *
+ * BUGS:
+ * - Nothing guarantees the integrity of the entire chain. Consider the case
+ *   where the path "foo/bar/baz/qux" is passed, but "bar" is moved out of
+ *   "foo" into "quux" during the backwards walk. The result will be
+ *   "quux/bar/baz/qux", which could not have been obtained by an incremental
+ *   walk in userspace. Moreover, the path we return is inaccessible if the
+ *   calling thread lacks permission to traverse "quux".
+ */
 static int
 kern___realpathat(struct thread *td, int fd, const char *path, char *buf,
     size_t size, int flags, enum uio_seg pathseg)
@@ -3129,7 +3143,7 @@ kern___realpathat(struct thread *td, int fd, const char *path, char *buf,
 
 	if (flags != 0)
 		return (EINVAL);
-	NDINIT_ATRIGHTS(&nd, LOOKUP, FOLLOW | SAVENAME | WANTPARENT | AUDITVNODE1,
+	NDINIT_ATRIGHTS(&nd, LOOKUP, FOLLOW | WANTPARENT | AUDITVNODE1,
 	    pathseg, path, fd, &cap_fstat_rights);
 	if ((error = namei(&nd)) != 0)
 		return (error);
@@ -3595,9 +3609,9 @@ vn_fullpath_any(struct vnode *vp, struct vnode *rdir, char *buf, char **retbuf,
 /*
  * Resolve an arbitrary vnode to a pathname (taking care of hardlinks).
  *
- * Since the namecache does not track hardlinks, the caller is
- * expected to first look up the target vnode with SAVENAME |
- * WANTPARENT flags passed to namei to get dvp and vp.
+ * Since the namecache does not track hardlinks, the caller is expected to
+ * first look up the target vnode with WANTPARENT flag passed to namei to get
+ * dvp and vp.
  *
  * Then we have 2 cases:
  * - if the found vnode is a directory, the path can be constructed just by
@@ -3781,7 +3795,7 @@ vn_path_to_global_path(struct thread *td, struct vnode *vp, char *path,
 		vrele(vp);
 		goto out;
 	}
-	NDFREE(&nd, NDF_ONLY_PNBUF);
+	NDFREE_PNBUF(&nd);
 	vp1 = nd.ni_vp;
 	vrele(vp);
 	if (vp1 == vp)
@@ -3923,7 +3937,6 @@ struct cache_fpl {
 	enum cache_fpl_status status:8;
 	bool in_smr;
 	bool fsearch;
-	bool savename;
 	struct pwd **pwd;
 #ifdef INVARIANTS
 	struct cache_fpl_debug debug;
@@ -3946,10 +3959,8 @@ cache_fpl_cleanup_cnp(struct componentname *cnp)
 {
 
 	uma_zfree(namei_zone, cnp->cn_pnbuf);
-#ifdef DIAGNOSTIC
 	cnp->cn_pnbuf = NULL;
 	cnp->cn_nameptr = NULL;
-#endif
 }
 
 static struct vnode *
@@ -4161,7 +4172,6 @@ cache_fpl_handled_error_impl(struct cache_fpl *fpl, int error, int line)
 	fpl->line = line;
 	fpl->dvp = NULL;
 	fpl->tvp = NULL;
-	fpl->savename = false;
 	return (error);
 }
 
@@ -4176,9 +4186,9 @@ cache_fpl_terminated(struct cache_fpl *fpl)
 
 #define CACHE_FPL_SUPPORTED_CN_FLAGS \
 	(NC_NOMAKEENTRY | NC_KEEPPOSENTRY | LOCKLEAF | LOCKPARENT | WANTPARENT | \
-	 FAILIFEXISTS | FOLLOW | EMPTYPATH | LOCKSHARED | SAVENAME | SAVESTART | \
-	 WILLBEDIR | ISOPEN | NOMACCHECK | AUDITVNODE1 | AUDITVNODE2 | NOCAPCHECK | \
-	 OPENREAD | OPENWRITE)
+	 FAILIFEXISTS | FOLLOW | EMPTYPATH | LOCKSHARED | SAVESTART | WILLBEDIR | \
+	 ISOPEN | NOMACCHECK | AUDITVNODE1 | AUDITVNODE2 | NOCAPCHECK | OPENREAD | \
+	 OPENWRITE | WANTIOCTLCAPS)
 
 #define CACHE_FPL_INTERNAL_CN_FLAGS \
 	(ISDOTDOT | MAKEENTRY | ISLASTCN)
@@ -4525,14 +4535,11 @@ cache_fplookup_final_modifying(struct cache_fpl *fpl)
 	}
 
 	fpl->tvp = tvp;
-	fpl->savename = (cnp->cn_flags & SAVENAME) != 0;
 
 	if (tvp == NULL) {
 		if ((cnp->cn_flags & SAVESTART) != 0) {
 			ndp->ni_startdir = dvp;
 			vrefact(ndp->ni_startdir);
-			cnp->cn_flags |= SAVENAME;
-			fpl->savename = true;
 		}
 		MPASS(error == EJUSTRETURN);
 		if ((cnp->cn_flags & LOCKPARENT) == 0) {
@@ -4593,8 +4600,6 @@ cache_fplookup_final_modifying(struct cache_fpl *fpl)
 	if ((cnp->cn_flags & SAVESTART) != 0) {
 		ndp->ni_startdir = dvp;
 		vrefact(ndp->ni_startdir);
-		cnp->cn_flags |= SAVENAME;
-		fpl->savename = true;
 	}
 
 	return (cache_fpl_handled(fpl));
@@ -4939,9 +4944,6 @@ cache_fplookup_noentry(struct cache_fpl *fpl)
 	}
 
 	fpl->tvp = tvp;
-	if (!fpl->savename) {
-		MPASS((cnp->cn_flags & SAVENAME) == 0);
-	}
 
 	if (tvp == NULL) {
 		MPASS(error == EJUSTRETURN);
@@ -6075,7 +6077,6 @@ cache_fplookup(struct nameidata *ndp, enum cache_fpl_status *status,
 #endif
 	fpl.nulchar = &cnp->cn_nameptr[ndp->ni_pathlen - 1];
 	fpl.fsearch = false;
-	fpl.savename = (cnp->cn_flags & SAVENAME) != 0;
 	fpl.tvp = NULL; /* for degenerate path handling */
 	fpl.pwd = pwdp;
 	pwd = pwd_get_smr();
@@ -6114,17 +6115,12 @@ out:
 	if (__predict_true(fpl.status == CACHE_FPL_STATUS_HANDLED)) {
 		MPASS(error != CACHE_FPL_FAILED);
 		if (error != 0) {
+			cache_fpl_cleanup_cnp(fpl.cnp);
 			MPASS(fpl.dvp == NULL);
 			MPASS(fpl.tvp == NULL);
-			MPASS(fpl.savename == false);
 		}
 		ndp->ni_dvp = fpl.dvp;
 		ndp->ni_vp = fpl.tvp;
-		if (fpl.savename) {
-			cnp->cn_flags |= HASBUF;
-		} else {
-			cache_fpl_cleanup_cnp(cnp);
-		}
 	}
 	return (error);
 }

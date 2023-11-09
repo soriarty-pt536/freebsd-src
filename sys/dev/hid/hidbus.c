@@ -293,10 +293,10 @@ hidbus_detach_children(device_t dev)
 
 	error = 0;
 
-	is_bus = device_get_devclass(dev) == hidbus_devclass;
+	is_bus = device_get_devclass(dev) == devclass_find("hidbus");
 	bus = is_bus ? dev : device_get_parent(dev);
 
-	KASSERT(device_get_devclass(bus) == hidbus_devclass,
+	KASSERT(device_get_devclass(bus) == devclass_find("hidbus"),
 	    ("Device is not hidbus or it's child"));
 
 	if (is_bus) {
@@ -610,20 +610,20 @@ hidbus_intr_start(device_t child)
 	struct hidbus_softc *sc = device_get_softc(bus);
 	struct hidbus_ivars *ivar = device_get_ivars(child);
 	struct hidbus_ivars *tlc;
-	int refcnt = 0;
+	bool refcnted = false;
 	int error;
 
 	if (sx_xlock_sig(&sc->sx) != 0)
 		return (EINTR);
 	CK_STAILQ_FOREACH(tlc, &sc->tlcs, link) {
-		refcnt += tlc->refcnt;
+		refcnted |= (tlc->refcnt != 0);
 		if (tlc == ivar) {
 			mtx_lock(tlc->mtx);
 			++tlc->refcnt;
 			mtx_unlock(tlc->mtx);
 		}
 	}
-	error = refcnt != 0 ? 0 : HID_INTR_START(device_get_parent(bus));
+	error = refcnted ? 0 : HID_INTR_START(device_get_parent(bus));
 	sx_unlock(&sc->sx);
 
 	return (error);
@@ -636,7 +636,7 @@ hidbus_intr_stop(device_t child)
 	struct hidbus_softc *sc = device_get_softc(bus);
 	struct hidbus_ivars *ivar = device_get_ivars(child);
 	struct hidbus_ivars *tlc;
-	bool refcnt = 0;
+	bool refcnted = false;
 	int error;
 
 	if (sx_xlock_sig(&sc->sx) != 0)
@@ -648,9 +648,9 @@ hidbus_intr_stop(device_t child)
 			--tlc->refcnt;
 			mtx_unlock(tlc->mtx);
 		}
-		refcnt += tlc->refcnt;
+		refcnted |= (tlc->refcnt != 0);
 	}
-	error = refcnt != 0 ? 0 : HID_INTR_STOP(device_get_parent(bus));
+	error = refcnted ? 0 : HID_INTR_STOP(device_get_parent(bus));
 	sx_unlock(&sc->sx);
 
 	return (error);
@@ -686,7 +686,7 @@ hid_get_report_descr(device_t dev, void **data, hid_size_t *len)
 	device_t bus;
 	struct hidbus_softc *sc;
 
-	bus = device_get_devclass(dev) == hidbus_devclass ?
+	bus = device_get_devclass(dev) == devclass_find("hidbus") ?
 	    dev : device_get_parent(dev);
 	sc = device_get_softc(bus);
 
@@ -726,7 +726,7 @@ hid_set_report_descr(device_t dev, const void *data, hid_size_t len)
 
 	bus_topo_assert();
 
-	is_bus = device_get_devclass(dev) == hidbus_devclass;
+	is_bus = device_get_devclass(dev) == devclass_find("hidbus");
 	bus = is_bus ? dev : device_get_parent(dev);
 	sc = device_get_softc(bus);
 
@@ -804,7 +804,7 @@ hidbus_lookup_id(device_t dev, const struct hid_device_id *id, int nitems_id)
 
 	id_end = id + nitems_id;
 	info = hid_get_device_info(dev);
-	is_child = device_get_devclass(dev) != hidbus_devclass;
+	is_child = device_get_devclass(dev) != devclass_find("hidbus");
 	if (is_child)
 		usage = hidbus_get_usage(dev);
 
@@ -880,7 +880,7 @@ hid_get_device_info(device_t dev)
 {
 	device_t bus;
 
-	bus = device_get_devclass(dev) == hidbus_devclass ?
+	bus = device_get_devclass(dev) == devclass_find("hidbus") ?
 	    dev : device_get_parent(dev);
 
 	return (device_get_ivars(bus));
@@ -911,11 +911,11 @@ static device_method_t hidbus_methods[] = {
 	DEVMETHOD(hid_set_report,	hid_set_report),
 	DEVMETHOD(hid_set_idle,		hid_set_idle),
 	DEVMETHOD(hid_set_protocol,	hid_set_protocol),
+	DEVMETHOD(hid_ioctl,		hid_ioctl),
 
 	DEVMETHOD_END
 };
 
-devclass_t hidbus_devclass;
 driver_t hidbus_driver = {
 	"hidbus",
 	hidbus_methods,
@@ -924,5 +924,5 @@ driver_t hidbus_driver = {
 
 MODULE_DEPEND(hidbus, hid, 1, 1, 1);
 MODULE_VERSION(hidbus, 1);
-DRIVER_MODULE(hidbus, iichid, hidbus_driver, hidbus_devclass, 0, 0);
-DRIVER_MODULE(hidbus, usbhid, hidbus_driver, hidbus_devclass, 0, 0);
+DRIVER_MODULE(hidbus, iichid, hidbus_driver, 0, 0);
+DRIVER_MODULE(hidbus, usbhid, hidbus_driver, 0, 0);

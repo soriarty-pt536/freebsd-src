@@ -1,5 +1,5 @@
 /*-
- * SPDX-License-Identifier: BSD-2-Clause-FreeBSD
+ * SPDX-License-Identifier: BSD-2-Clause
  *
  * Copyright (c) 2015 Netflix, Inc.
  *
@@ -7,22 +7,22 @@
  * modification, are permitted provided that the following conditions
  * are met:
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer,
- *    without modification, immediately at the beginning of the file.
+ *    notice, this list of conditions and the following disclaimer.
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
  *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
- * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
- * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
- * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
- * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
  *
  * Derived from ata_da.c:
  * Copyright (c) 2009 Alexander Motin <mav@FreeBSD.org>
@@ -499,7 +499,7 @@ ndastrategy(struct bio *bp)
 }
 
 static int
-ndadump(void *arg, void *virtual, vm_offset_t physical, off_t offset, size_t length)
+ndadump(void *arg, void *virtual, off_t offset, size_t length)
 {
 	struct	    cam_periph *periph;
 	struct	    nda_softc *softc;
@@ -601,12 +601,17 @@ ndaoninvalidate(struct cam_periph *periph)
 #endif
 
 	/*
-	 * Return all queued I/O with ENXIO.
-	 * XXX Handle any transactions queued to the card
-	 *     with XPT_ABORT_CCB.
+	 * Return all queued I/O with ENXIO. Transactions may be queued up here
+	 * for retry (since we are called while there's other transactions
+	 * pending). Any requests in the hardware will drain before ndacleanup
+	 * is called.
 	 */
 	cam_iosched_flush(softc->cam_iosched, NULL, ENXIO);
 
+	/*
+	 * Tell GEOM that we've gone away, we'll get a callback when it is
+	 * done cleaning up its resources.
+	 */
 	disk_gone(softc->disk);
 }
 
@@ -693,9 +698,9 @@ ndaasync(void *callback_arg, u_int32_t code,
 	}
 	case AC_LOST_DEVICE:
 	default:
-		cam_periph_async(periph, code, path, arg);
 		break;
 	}
+	cam_periph_async(periph, code, path, arg);
 }
 
 static void
@@ -881,7 +886,7 @@ ndaregister(struct cam_periph *periph, void *arg)
 	/*
 	 * Register this media as a disk
 	 */
-	(void)cam_periph_hold(periph, PRIBIO);
+	(void)cam_periph_acquire(periph);
 	cam_periph_unlock(periph);
 	snprintf(announce_buf, sizeof(announce_buf),
 	    "kern.cam.nda.%d.quirks", periph->unit_number);
@@ -959,20 +964,7 @@ ndaregister(struct cam_periph *periph, void *arg)
 	if (nda_nvd_compat)
 		disk_add_alias(disk, "nvd");
 
-	/*
-	 * Acquire a reference to the periph before we register with GEOM.
-	 * We'll release this reference once GEOM calls us back (via
-	 * ndadiskgonecb()) telling us that our provider has been freed.
-	 */
-	if (cam_periph_acquire(periph) != 0) {
-		xpt_print(periph->path, "%s: lost periph during "
-			  "registration!\n", __func__);
-		cam_periph_lock(periph);
-		return (CAM_REQ_CMP_ERR);
-	}
-	disk_create(softc->disk, DISK_VERSION);
 	cam_periph_lock(periph);
-	cam_periph_unhold(periph);
 
 	snprintf(announce_buf, sizeof(announce_buf),
 		"%juMB (%ju %u byte sectors)",
@@ -997,6 +989,15 @@ ndaregister(struct cam_periph *periph, void *arg)
 	    ndaasync, periph, periph->path);
 
 	softc->state = NDA_STATE_NORMAL;
+
+	/*
+	 * We'll release this reference once GEOM calls us back via
+	 * ndadiskgonecb(), telling us that our provider has been freed.
+	 */
+	if (cam_periph_acquire(periph) == 0)
+		disk_create(softc->disk, DISK_VERSION);
+
+	cam_periph_release_locked(periph);
 	return(CAM_REQ_CMP);
 }
 
@@ -1317,14 +1318,14 @@ ndaflush(void)
 
 		if (SCHEDULER_STOPPED()) {
 			/*
-			 * If we paniced with the lock held or the periph is not
+			 * If we panicked with the lock held or the periph is not
 			 * open, do not recurse.  Otherwise, call ndadump since
 			 * that avoids the sleeping cam_periph_getccb does if no
 			 * CCBs are available.
 			 */
 			if (!cam_periph_owned(periph) &&
 			    (softc->flags & NDA_FLAG_OPEN)) {
-				ndadump(softc->disk, NULL, 0, 0, 0);
+				ndadump(softc->disk, NULL, 0, 0);
 			}
 			continue;
 		}
@@ -1353,6 +1354,9 @@ ndaflush(void)
 static void
 ndashutdown(void *arg, int howto)
 {
+
+	if ((howto & RB_NOSYNC) != 0)
+		return;
 
 	ndaflush();
 }

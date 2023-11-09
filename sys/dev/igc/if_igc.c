@@ -59,6 +59,7 @@ static pci_vendor_info_t igc_vendor_info_array[] =
 	PVID(0x8086, IGC_DEV_ID_I225_K2, "Intel(R) Ethernet Controller I225-K(2)"),
 	PVID(0x8086, IGC_DEV_ID_I225_LMVP, "Intel(R) Ethernet Controller I225-LMvP(2)"),
 	PVID(0x8086, IGC_DEV_ID_I226_K, "Intel(R) Ethernet Controller I226-K"),
+	PVID(0x8086, IGC_DEV_ID_I226_LMVP, "Intel(R) Ethernet Controller I226-LMvP"),
 	PVID(0x8086, IGC_DEV_ID_I225_IT, "Intel(R) Ethernet Controller I225-IT(2)"),
 	PVID(0x8086, IGC_DEV_ID_I226_LM, "Intel(R) Ethernet Controller I226-LM"),
 	PVID(0x8086, IGC_DEV_ID_I226_V, "Intel(R) Ethernet Controller I226-V"),
@@ -92,8 +93,6 @@ static void	igc_if_media_status(if_ctx_t, struct ifmediareq *);
 static int	igc_if_media_change(if_ctx_t ctx);
 static int	igc_if_mtu_set(if_ctx_t ctx, uint32_t mtu);
 static void	igc_if_timer(if_ctx_t ctx, uint16_t qid);
-static void	igc_if_vlan_register(if_ctx_t ctx, u16 vtag);
-static void	igc_if_vlan_unregister(if_ctx_t ctx, u16 vtag);
 static void	igc_if_watchdog_reset(if_ctx_t ctx);
 static bool	igc_if_needs_restart(if_ctx_t ctx, enum iflib_restart_event event);
 
@@ -117,7 +116,7 @@ static void	igc_if_debug(if_ctx_t ctx);
 static void	igc_update_stats_counters(struct igc_adapter *);
 static void	igc_add_hw_stats(struct igc_adapter *adapter);
 static int	igc_if_set_promisc(if_ctx_t ctx, int flags);
-static void	igc_setup_vlan_hw_support(struct igc_adapter *);
+static void	igc_setup_vlan_hw_support(if_ctx_t ctx);
 static int	igc_sysctl_nvm_info(SYSCTL_HANDLER_ARGS);
 static void	igc_print_nvm_info(struct igc_adapter *);
 static int	igc_sysctl_debug_info(SYSCTL_HANDLER_ARGS);
@@ -167,8 +166,7 @@ static driver_t igc_driver = {
 	"igc", igc_methods, sizeof(struct igc_adapter),
 };
 
-static devclass_t igc_devclass;
-DRIVER_MODULE(igc, pci, igc_driver, igc_devclass, 0, 0);
+DRIVER_MODULE(igc, pci, igc_driver, 0, 0);
 
 MODULE_DEPEND(igc, pci, 1, 1, 1);
 MODULE_DEPEND(igc, ether, 1, 1, 1);
@@ -199,8 +197,6 @@ static device_method_t igc_if_methods[] = {
 	DEVMETHOD(ifdi_promisc_set, igc_if_set_promisc),
 	DEVMETHOD(ifdi_timer, igc_if_timer),
 	DEVMETHOD(ifdi_watchdog_reset, igc_if_watchdog_reset),
-	DEVMETHOD(ifdi_vlan_register, igc_if_vlan_register),
-	DEVMETHOD(ifdi_vlan_unregister, igc_if_vlan_unregister),
 	DEVMETHOD(ifdi_get_counter, igc_if_get_counter),
 	DEVMETHOD(ifdi_rx_queue_intr_enable, igc_if_rx_queue_intr_enable),
 	DEVMETHOD(ifdi_tx_queue_intr_enable, igc_if_tx_queue_intr_enable),
@@ -441,9 +437,8 @@ igc_set_num_queues(if_ctx_t ctx)
 
 #define	IGC_CAPS							\
     IFCAP_HWCSUM | IFCAP_VLAN_MTU | IFCAP_VLAN_HWTAGGING |		\
-    IFCAP_VLAN_HWCSUM | IFCAP_WOL | IFCAP_VLAN_HWFILTER | IFCAP_TSO4 |	\
-    IFCAP_LRO | IFCAP_VLAN_HWTSO | IFCAP_JUMBO_MTU | IFCAP_HWCSUM_IPV6 |\
-    IFCAP_TSO6
+    IFCAP_VLAN_HWCSUM | IFCAP_WOL | IFCAP_TSO4 | IFCAP_LRO |		\
+    IFCAP_VLAN_HWTSO | IFCAP_JUMBO_MTU | IFCAP_HWCSUM_IPV6 | IFCAP_TSO6
 
 /*********************************************************************
  *  Device initialization routine
@@ -844,21 +839,11 @@ igc_if_init(if_ctx_t ctx)
 	adapter->rx_mbuf_sz = iflib_get_rx_mbuf_sz(ctx);
 	igc_initialize_receive_unit(ctx);
 
-	/* Use real VLAN Filter support? */
-	if (if_getcapenable(ifp) & IFCAP_VLAN_HWTAGGING) {
-		if (if_getcapenable(ifp) & IFCAP_VLAN_HWFILTER)
-			/* Use real VLAN Filter support */
-			igc_setup_vlan_hw_support(adapter);
-		else {
-			u32 ctrl;
-			ctrl = IGC_READ_REG(&adapter->hw, IGC_CTRL);
-			ctrl |= IGC_CTRL_VME;
-			IGC_WRITE_REG(&adapter->hw, IGC_CTRL, ctrl);
-		}
-	}
+	/* Set up VLAN support */
+	igc_setup_vlan_hw_support(ctx);
 
 	/* Don't lose promiscuous settings */
-	igc_if_set_promisc(ctx, IFF_PROMISC);
+	igc_if_set_promisc(ctx, if_getflags(ifp));
 	igc_clear_hw_cntrs_base_generic(&adapter->hw);
 
 	if (adapter->intr_type == IFLIB_INTR_MSIX) /* Set up queue routing */
@@ -1070,16 +1055,16 @@ igc_if_media_change(if_ctx_t ctx)
 		adapter->hw.phy.autoneg_advertised = ADVERTISE_1000_FULL;
 		break;
 	case IFM_100_TX:
-		if ((ifm->ifm_media & IFM_GMASK) == IFM_HDX)
-			adapter->hw.phy.autoneg_advertised = ADVERTISE_100_HALF;
-		else
+		if ((ifm->ifm_media & IFM_GMASK) == IFM_FDX)
 			adapter->hw.phy.autoneg_advertised = ADVERTISE_100_FULL;
+		else
+			adapter->hw.phy.autoneg_advertised = ADVERTISE_100_HALF;
 		break;
 	case IFM_10_T:
-		if ((ifm->ifm_media & IFM_GMASK) == IFM_HDX)
-			adapter->hw.phy.autoneg_advertised = ADVERTISE_10_HALF;
-		else
+		if ((ifm->ifm_media & IFM_GMASK) == IFM_FDX)
 			adapter->hw.phy.autoneg_advertised = ADVERTISE_10_FULL;
+		else
+			adapter->hw.phy.autoneg_advertised = ADVERTISE_10_HALF;
 		break;
 	default:
 		device_printf(adapter->dev, "Unsupported media type\n");
@@ -1609,7 +1594,7 @@ igc_reset(if_ctx_t ctx)
 	device_t dev = iflib_get_dev(ctx);
 	struct igc_adapter *adapter = iflib_get_softc(ctx);
 	struct igc_hw *hw = &adapter->hw;
-	u16 rx_buffer_size;
+	u32 rx_buffer_size;
 	u32 pba;
 
 	INIT_DEBUGOUT("igc_reset: begin");
@@ -2138,62 +2123,25 @@ igc_initialize_receive_unit(if_ctx_t ctx)
 }
 
 static void
-igc_if_vlan_register(if_ctx_t ctx, u16 vtag)
+igc_setup_vlan_hw_support(if_ctx_t ctx)
 {
 	struct igc_adapter *adapter = iflib_get_softc(ctx);
-	u32 index, bit;
-
-	index = (vtag >> 5) & 0x7F;
-	bit = vtag & 0x1F;
-	adapter->shadow_vfta[index] |= (1 << bit);
-	++adapter->num_vlans;
-}
-
-static void
-igc_if_vlan_unregister(if_ctx_t ctx, u16 vtag)
-{
-	struct igc_adapter *adapter = iflib_get_softc(ctx);
-	u32 index, bit;
-
-	index = (vtag >> 5) & 0x7F;
-	bit = vtag & 0x1F;
-	adapter->shadow_vfta[index] &= ~(1 << bit);
-	--adapter->num_vlans;
-}
-
-static void
-igc_setup_vlan_hw_support(struct igc_adapter *adapter)
-{
 	struct igc_hw *hw = &adapter->hw;
+	struct ifnet *ifp = iflib_get_ifp(ctx);
 	u32 reg;
 
-	/*
-	 * We get here thru init_locked, meaning
-	 * a soft reset, this has already cleared
-	 * the VFTA and other state, so if there
-	 * have been no vlan's registered do nothing.
-	 */
-	if (adapter->num_vlans == 0)
-		return;
+	/* igc hardware doesn't seem to implement VFTA for HWFILTER */
 
-	/*
-	 * A soft reset zero's out the VFTA, so
-	 * we need to repopulate it now.
-	 */
-	for (int i = 0; i < IGC_VFTA_SIZE; i++)
-		if (adapter->shadow_vfta[i] != 0)
-			IGC_WRITE_REG_ARRAY(hw, IGC_VFTA,
-			    i, adapter->shadow_vfta[i]);
-
-	reg = IGC_READ_REG(hw, IGC_CTRL);
-	reg |= IGC_CTRL_VME;
-	IGC_WRITE_REG(hw, IGC_CTRL, reg);
-
-	/* Enable the Filter Table */
-	reg = IGC_READ_REG(hw, IGC_RCTL);
-	reg &= ~IGC_RCTL_CFIEN;
-	reg |= IGC_RCTL_VFE;
-	IGC_WRITE_REG(hw, IGC_RCTL, reg);
+	if (if_getcapenable(ifp) & IFCAP_VLAN_HWTAGGING &&
+	    !igc_disable_crc_stripping) {
+		reg = IGC_READ_REG(hw, IGC_CTRL);
+		reg |= IGC_CTRL_VME;
+		IGC_WRITE_REG(hw, IGC_CTRL, reg);
+	} else {
+		reg = IGC_READ_REG(hw, IGC_CTRL);
+		reg &= ~IGC_CTRL_VME;
+		IGC_WRITE_REG(hw, IGC_CTRL, reg);
+	}
 }
 
 static void
@@ -2469,6 +2417,7 @@ igc_if_needs_restart(if_ctx_t ctx __unused, enum iflib_restart_event event)
 {
 	switch (event) {
 	case IFLIB_RESTART_VLAN_CONFIG:
+		return (false);
 	default:
 		return (true);
 	}

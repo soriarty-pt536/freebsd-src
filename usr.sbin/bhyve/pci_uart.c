@@ -66,19 +66,19 @@ pci_uart_intr_deassert(void *arg)
 }
 
 static void
-pci_uart_write(struct vmctx *ctx, int vcpu, struct pci_devinst *pi,
-	       int baridx, uint64_t offset, int size, uint64_t value)
+pci_uart_write(struct vmctx *ctx __unused, int vcpu __unused,
+    struct pci_devinst *pi, int baridx, uint64_t offset, int size,
+    uint64_t value)
 {
-
 	assert(baridx == 0);
 	assert(size == 1);
 
 	uart_write(pi->pi_arg, offset, value);
 }
 
-uint64_t
-pci_uart_read(struct vmctx *ctx, int vcpu, struct pci_devinst *pi,
-	      int baridx, uint64_t offset, int size)
+static uint64_t
+pci_uart_read(struct vmctx *ctx __unused, int vcpu __unused,
+    struct pci_devinst *pi, int baridx, uint64_t offset, int size)
 {
 	uint8_t val;
 
@@ -99,7 +99,7 @@ pci_uart_legacy_config(nvlist_t *nvl, const char *opts)
 }
 
 static int
-pci_uart_init(struct vmctx *ctx, struct pci_devinst *pi, nvlist_t *nvl)
+pci_uart_init(struct vmctx *ctx __unused, struct pci_devinst *pi, nvlist_t *nvl)
 {
 	struct uart_softc *sc;
 	const char *device;
@@ -125,7 +125,7 @@ pci_uart_init(struct vmctx *ctx, struct pci_devinst *pi, nvlist_t *nvl)
 	return (0);
 }
 
-struct pci_devemu pci_de_com = {
+static const struct pci_devemu pci_de_com = {
 	.pe_emu =	"uart",
 	.pe_init =	pci_uart_init,
 	.pe_legacy_config = pci_uart_legacy_config,

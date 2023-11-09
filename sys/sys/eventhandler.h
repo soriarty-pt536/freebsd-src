@@ -93,7 +93,7 @@ struct eventhandler_list {
  * to pre-define a symbol for the eventhandler list. This symbol can be used by
  * EVENTHANDLER_DIRECT_INVOKE, which has the advantage of not needing to do a
  * locked search of the global list of eventhandler lists. At least
- * EVENTHANDLER_LIST_DEFINE must be be used for EVENTHANDLER_DIRECT_INVOKE to
+ * EVENTHANDLER_LIST_DEFINE must be used for EVENTHANDLER_DIRECT_INVOKE to
  * work. EVENTHANDLER_LIST_DECLARE is only needed if the call to
  * EVENTHANDLER_DIRECT_INVOKE is in a different compilation unit from
  * EVENTHANDLER_LIST_DEFINE. If the events are even relatively high frequency
@@ -205,6 +205,8 @@ EVENTHANDLER_DECLARE(power_suspend_early, power_change_fn);
 typedef void (*vm_lowmem_handler_t)(void *, int);
 #define	LOWMEM_PRI_DEFAULT	EVENTHANDLER_PRI_FIRST
 EVENTHANDLER_DECLARE(vm_lowmem, vm_lowmem_handler_t);
+/* Some of mbuf(9) zones reached maximum */
+EVENTHANDLER_DECLARE(mbuf_lowmem, vm_lowmem_handler_t);
 
 /* Root mounted event */
 typedef void (*mountroot_handler_t)(void *);
@@ -309,8 +311,10 @@ enum evhdev_detach {
 };
 typedef void (*device_attach_fn)(void *, device_t);
 typedef void (*device_detach_fn)(void *, device_t, enum evhdev_detach);
+typedef void (*device_nomatch_fn)(void *, device_t);
 EVENTHANDLER_DECLARE(device_attach, device_attach_fn);
 EVENTHANDLER_DECLARE(device_detach, device_detach_fn);
+EVENTHANDLER_DECLARE(device_nomatch, device_nomatch_fn);
 
 /* Interface address addition and removal event */
 struct ifaddr;

@@ -55,7 +55,6 @@ __FBSDID("$FreeBSD$");
 #include <sys/sched.h>
 #include <sys/smp.h>
 #include <sys/sysctl.h>
-#include <sys/sysent.h>
 #include <sys/systm.h>
 #include <sys/sysproto.h>
 #include <sys/syscallsubr.h>
@@ -175,8 +174,6 @@ static SYSCTL_NODE(_debug_umtx, OID_AUTO, chains, CTLFLAG_RD | CTLFLAG_MPSAFE, 0
 
 static inline void umtx_abs_timeout_init2(struct umtx_abs_timeout *timo,
     const struct _umtx_time *umtxtime);
-static int umtx_abs_timeout_gethz(struct umtx_abs_timeout *timo);
-static inline void umtx_abs_timeout_update(struct umtx_abs_timeout *timo);
 
 static void umtx_shm_init(void);
 static void umtxq_sysinit(void *);
@@ -683,20 +680,14 @@ umtx_abs_timeout_init(struct umtx_abs_timeout *timo, int clockid,
 	timo->clockid = clockid;
 	if (!absolute) {
 		timo->is_abs_real = false;
-		umtx_abs_timeout_update(timo);
+		kern_clock_gettime(curthread, timo->clockid, &timo->cur);
 		timespecadd(&timo->cur, timeout, &timo->end);
 	} else {
 		timo->end = *timeout;
 		timo->is_abs_real = clockid == CLOCK_REALTIME ||
 		    clockid == CLOCK_REALTIME_FAST ||
-		    clockid == CLOCK_REALTIME_PRECISE;
-		/*
-		 * If is_abs_real, umtxq_sleep will read the clock
-		 * after setting td_rtcgen; otherwise, read it here.
-		 */
-		if (!timo->is_abs_real) {
-			umtx_abs_timeout_update(timo);
-		}
+		    clockid == CLOCK_REALTIME_PRECISE ||
+		    clockid == CLOCK_SECOND;
 	}
 }
 
@@ -709,22 +700,82 @@ umtx_abs_timeout_init2(struct umtx_abs_timeout *timo,
 	    (umtxtime->_flags & UMTX_ABSTIME) != 0, &umtxtime->_timeout);
 }
 
-static void
-umtx_abs_timeout_update(struct umtx_abs_timeout *timo)
-{
-
-	kern_clock_gettime(curthread, timo->clockid, &timo->cur);
-}
-
 static int
-umtx_abs_timeout_gethz(struct umtx_abs_timeout *timo)
+umtx_abs_timeout_getsbt(struct umtx_abs_timeout *timo, sbintime_t *sbt,
+    int *flags)
 {
+	struct bintime bt, bbt;
 	struct timespec tts;
+	sbintime_t rem;
 
-	if (timespeccmp(&timo->end, &timo->cur, <=))
-		return (-1);
-	timespecsub(&timo->end, &timo->cur, &tts);
-	return (tstohz(&tts));
+	switch (timo->clockid) {
+
+	/* Clocks that can be converted into absolute time. */
+	case CLOCK_REALTIME:
+	case CLOCK_REALTIME_PRECISE:
+	case CLOCK_REALTIME_FAST:
+	case CLOCK_MONOTONIC:
+	case CLOCK_MONOTONIC_PRECISE:
+	case CLOCK_MONOTONIC_FAST:
+	case CLOCK_UPTIME:
+	case CLOCK_UPTIME_PRECISE:
+	case CLOCK_UPTIME_FAST:
+	case CLOCK_SECOND:
+		timespec2bintime(&timo->end, &bt);
+		switch (timo->clockid) {
+		case CLOCK_REALTIME:
+		case CLOCK_REALTIME_PRECISE:
+		case CLOCK_REALTIME_FAST:
+		case CLOCK_SECOND:
+			getboottimebin(&bbt);
+			bintime_sub(&bt, &bbt);
+			break;
+		}
+		if (bt.sec < 0)
+			return (ETIMEDOUT);
+		if (bt.sec >= (SBT_MAX >> 32)) {
+			*sbt = 0;
+			*flags = 0;
+			return (0);
+		}
+		*sbt = bttosbt(bt);
+
+		/*
+		 * Check if the absolute time should be aligned to
+		 * avoid firing multiple timer events in non-periodic
+		 * timer mode.
+		 */
+		switch (timo->clockid) {
+		case CLOCK_REALTIME_FAST:
+		case CLOCK_MONOTONIC_FAST:
+		case CLOCK_UPTIME_FAST:
+			rem = *sbt % tc_tick_sbt;
+			if (__predict_true(rem != 0))
+				*sbt += tc_tick_sbt - rem;
+			break;
+		case CLOCK_SECOND:
+			rem = *sbt % SBT_1S;
+			if (__predict_true(rem != 0))
+				*sbt += SBT_1S - rem;
+			break;
+		}
+		*flags = C_ABSOLUTE;
+		return (0);
+
+	/* Clocks that has to be periodically polled. */
+	case CLOCK_VIRTUAL:
+	case CLOCK_PROF:
+	case CLOCK_THREAD_CPUTIME_ID:
+	case CLOCK_PROCESS_CPUTIME_ID:
+	default:
+		kern_clock_gettime(curthread, timo->clockid, &timo->cur);
+		if (timespeccmp(&timo->end, &timo->cur, <=))
+			return (ETIMEDOUT);
+		timespecsub(&timo->end, &timo->cur, &tts);
+		*sbt = tick_sbt * tstohz(&tts);
+		*flags = C_HARDCLOCK;
+		return (0);
+	}
 }
 
 static uint32_t
@@ -746,15 +797,11 @@ umtx_unlock_val(uint32_t flags, bool rb)
  */
 int
 umtxq_sleep(struct umtx_q *uq, const char *wmesg,
-    struct umtx_abs_timeout *abstime)
+    struct umtx_abs_timeout *timo)
 {
 	struct umtxq_chain *uc;
-	int error, timo;
-
-	if (abstime != NULL && abstime->is_abs_real) {
-		curthread->td_rtcgen = atomic_load_acq_int(&rtc_generation);
-		umtx_abs_timeout_update(abstime);
-	}
+	sbintime_t sbt = 0;
+	int error, flags = 0;
 
 	uc = umtxq_getchain(&uq->uq_key);
 	UMTXQ_LOCKED_ASSERT(uc);
@@ -763,26 +810,24 @@ umtxq_sleep(struct umtx_q *uq, const char *wmesg,
 			error = 0;
 			break;
 		}
-		if (abstime != NULL) {
-			timo = umtx_abs_timeout_gethz(abstime);
-			if (timo < 0) {
-				error = ETIMEDOUT;
-				break;
-			}
-		} else
-			timo = 0;
-		error = msleep(uq, &uc->uc_lock, PCATCH | PDROP, wmesg, timo);
-		if (error == EINTR || error == ERESTART) {
-			umtxq_lock(&uq->uq_key);
-			break;
-		}
-		if (abstime != NULL) {
-			if (abstime->is_abs_real)
+		if (timo != NULL) {
+			if (timo->is_abs_real)
 				curthread->td_rtcgen =
 				    atomic_load_acq_int(&rtc_generation);
-			umtx_abs_timeout_update(abstime);
+			error = umtx_abs_timeout_getsbt(timo, &sbt, &flags);
+			if (error != 0)
+				break;
 		}
-		umtxq_lock(&uq->uq_key);
+		error = msleep_sbt(uq, &uc->uc_lock, PCATCH | PDROP, wmesg,
+		    sbt, 0, flags);
+		uc = umtxq_getchain(&uq->uq_key);
+		mtx_lock(&uc->uc_lock);
+		if (error == EINTR || error == ERESTART)
+			break;
+		if (error == EWOULDBLOCK && (flags & C_ABSOLUTE) != 0) {
+			error = ETIMEDOUT;
+			break;
+		}
 	}
 
 	curthread->td_rtcgen = 0;
@@ -2228,6 +2273,17 @@ do_lock_pi(struct thread *td, struct umutex *m, uint32_t flags,
 		}
 
 		/*
+		 * Nobody owns it, but the acquire failed. This can happen
+		 * with ll/sc atomics.
+		 */
+		if (owner == UMUTEX_UNOWNED) {
+			error = thread_check_susp(td, true);
+			if (error != 0)
+				break;
+			continue;
+		}
+
+		/*
 		 * Avoid overwriting a possible error from sleep due
 		 * to the pending signal with suspension check result.
 		 */
@@ -3502,24 +3558,28 @@ again:
 	umtxq_insert(uq);
 	umtxq_unlock(&uq->uq_key);
 	rv = casueword32(&sem->_has_waiters, 0, &count1, 1);
-	if (rv == 0)
+	if (rv != -1)
 		rv1 = fueword32(&sem->_count, &count);
-	if (rv == -1 || (rv == 0 && (rv1 == -1 || count != 0)) ||
-	    (rv == 1 && count1 == 0)) {
+	if (rv == -1 || rv1 == -1 || count != 0 || (rv == 1 && count1 == 0)) {
+		if (rv == 0)
+			suword32(&sem->_has_waiters, 0);
 		umtxq_lock(&uq->uq_key);
 		umtxq_unbusy(&uq->uq_key);
 		umtxq_remove(uq);
 		umtxq_unlock(&uq->uq_key);
-		if (rv == 1) {
-			rv = thread_check_susp(td, true);
-			if (rv == 0)
-				goto again;
-			error = rv;
+		if (rv == -1 || rv1 == -1) {
+			error = EFAULT;
 			goto out;
 		}
+		if (count != 0) {
+			error = 0;
+			goto out;
+		}
+		MPASS(rv == 1 && count1 == 0);
+		rv = thread_check_susp(td, true);
 		if (rv == 0)
-			rv = rv1;
-		error = rv == -1 ? EFAULT : 0;
+			goto again;
+		error = rv;
 		goto out;
 	}
 	umtxq_lock(&uq->uq_key);
@@ -3652,7 +3712,8 @@ again:
 			if (error == ERESTART)
 				error = EINTR;
 			if (error == EINTR) {
-				umtx_abs_timeout_update(&timo);
+				kern_clock_gettime(curthread, timo.clockid,
+				    &timo.cur);
 				timespecsub(&timo.end, &timo.cur,
 				    &timeout->_timeout);
 			}
@@ -3736,9 +3797,7 @@ umtx_copyin_timeout(const void *uaddr, struct timespec *tsp)
 
 	error = copyin(uaddr, tsp, sizeof(*tsp));
 	if (error == 0) {
-		if (tsp->tv_sec < 0 ||
-		    tsp->tv_nsec >= 1000000000 ||
-		    tsp->tv_nsec < 0)
+		if (!timespecvalid_interval(tsp))
 			error = EINVAL;
 	}
 	return (error);
@@ -3757,8 +3816,7 @@ umtx_copyin_umtx_time(const void *uaddr, size_t size, struct _umtx_time *tp)
 		error = copyin(uaddr, tp, sizeof(*tp));
 	if (error != 0)
 		return (error);
-	if (tp->_timeout.tv_sec < 0 ||
-	    tp->_timeout.tv_nsec >= 1000000000 || tp->_timeout.tv_nsec < 0)
+	if (!timespecvalid_interval(&tp->_timeout))
 		return (EINVAL);
 	return (0);
 }
@@ -4324,7 +4382,7 @@ umtx_shm_unref_reg(struct umtx_shm_reg *reg, bool force)
 	if (force) {
 		object = reg->ushm_obj->shm_object;
 		VM_OBJECT_WLOCK(object);
-		object->flags |= OBJ_UMTXDEAD;
+		vm_object_set_flag(object, OBJ_UMTXDEAD);
 		VM_OBJECT_WUNLOCK(object);
 	}
 	mtx_lock(&umtx_shm_lock);
@@ -4604,9 +4662,7 @@ umtx_copyin_timeouti386(const void *uaddr, struct timespec *tsp)
 
 	error = copyin(uaddr, &ts32, sizeof(ts32));
 	if (error == 0) {
-		if (ts32.tv_sec < 0 ||
-		    ts32.tv_nsec >= 1000000000 ||
-		    ts32.tv_nsec < 0)
+		if (!timespecvalid_interval(&ts32))
 			error = EINVAL;
 		else {
 			CP(ts32, *tsp, tv_sec);
@@ -4630,8 +4686,7 @@ umtx_copyin_umtx_timei386(const void *uaddr, size_t size, struct _umtx_time *tp)
 		error = copyin(uaddr, &t32, sizeof(t32));
 	if (error != 0)
 		return (error);
-	if (t32._timeout.tv_sec < 0 ||
-	    t32._timeout.tv_nsec >= 1000000000 || t32._timeout.tv_nsec < 0)
+	if (!timespecvalid_interval(&t32._timeout))
 		return (EINVAL);
 	TS_CP(t32, *tp, _timeout);
 	CP(t32, *tp, _flags);
@@ -4668,9 +4723,7 @@ umtx_copyin_timeoutx32(const void *uaddr, struct timespec *tsp)
 
 	error = copyin(uaddr, &ts32, sizeof(ts32));
 	if (error == 0) {
-		if (ts32.tv_sec < 0 ||
-		    ts32.tv_nsec >= 1000000000 ||
-		    ts32.tv_nsec < 0)
+		if (!timespecvalid_interval(&ts32))
 			error = EINVAL;
 		else {
 			CP(ts32, *tsp, tv_sec);
@@ -4694,8 +4747,7 @@ umtx_copyin_umtx_timex32(const void *uaddr, size_t size, struct _umtx_time *tp)
 		error = copyin(uaddr, &t32, sizeof(t32));
 	if (error != 0)
 		return (error);
-	if (t32._timeout.tv_sec < 0 ||
-	    t32._timeout.tv_nsec >= 1000000000 || t32._timeout.tv_nsec < 0)
+	if (!timespecvalid_interval(&t32._timeout))
 		return (EINVAL);
 	TS_CP(t32, *tp, _timeout);
 	CP(t32, *tp, _flags);

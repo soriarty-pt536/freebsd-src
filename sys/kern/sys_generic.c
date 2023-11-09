@@ -748,7 +748,7 @@ kern_ioctl(struct thread *td, int fd, u_long com, caddr_t data)
 	}
 
 #ifdef CAPABILITIES
-	if ((fp = fget_locked(fdp, fd)) == NULL) {
+	if ((fp = fget_noref(fdp, fd)) == NULL) {
 		error = EBADF;
 		goto out;
 	}
@@ -1052,9 +1052,7 @@ kern_pselect(struct thread *td, int nd, fd_set *in, fd_set *ou, fd_set *ex,
 		 * usermode and TDP_OLDMASK is cleared, restoring old
 		 * sigmask.
 		 */
-		thread_lock(td);
-		td->td_flags |= TDF_ASTPENDING;
-		thread_unlock(td);
+		ast_sched(td, TDA_SIGSUSPEND);
 	}
 	error = kern_select(td, nd, in, ou, ex, tvp, abi_nfdbits);
 	return (error);
@@ -1501,9 +1499,7 @@ kern_poll_kfds(struct thread *td, struct pollfd *kfds, u_int nfds,
 
 	precision = 0;
 	if (tsp != NULL) {
-		if (tsp->tv_sec < 0)
-			return (EINVAL);
-		if (tsp->tv_nsec < 0 || tsp->tv_nsec >= 1000000000)
+		if (!timespecvalid_interval(tsp))
 			return (EINVAL);
 		if (tsp->tv_sec == 0 && tsp->tv_nsec == 0)
 			sbt = 0;
@@ -1535,9 +1531,7 @@ kern_poll_kfds(struct thread *td, struct pollfd *kfds, u_int nfds,
 		 * usermode and TDP_OLDMASK is cleared, restoring old
 		 * sigmask.
 		 */
-		thread_lock(td);
-		td->td_flags |= TDF_ASTPENDING;
-		thread_unlock(td);
+		ast_sched(td, TDA_SIGSUSPEND);
 	}
 
 	seltdinit(td);

@@ -495,8 +495,7 @@ static driver_t uhso_driver = {
 	.size = sizeof(struct uhso_softc)
 };
 
-static devclass_t uhso_devclass;
-DRIVER_MODULE(uhso, uhub, uhso_driver, uhso_devclass, uhso_driver_loaded, 0);
+DRIVER_MODULE(uhso, uhub, uhso_driver, uhso_driver_loaded, NULL);
 MODULE_DEPEND(uhso, ucom, 1, 1, 1);
 MODULE_DEPEND(uhso, usb, 1, 1, 1);
 MODULE_VERSION(uhso, 1);
@@ -1102,7 +1101,7 @@ uhso_mux_intr_callback(struct usb_xfer *xfer, usb_error_t error)
 	struct usb_page_cache *pc;
 	struct usb_page_search res;
 	struct uhso_softc *sc = usbd_xfer_softc(xfer);
-	unsigned int i, mux;
+	unsigned i, mux;
 
 	UHSO_DPRINTF(3, "status %d\n", USB_GET_STATE(xfer));
 
@@ -1557,7 +1556,7 @@ uhso_attach_ifnet(struct uhso_softc *sc, struct usb_interface *iface, int type)
 	usb_error_t uerr;
 	struct sysctl_ctx_list *sctx;
 	struct sysctl_oid *soid;
-	unsigned int devunit;
+	unsigned devunit;
 
 	uerr = usbd_transfer_setup(sc->sc_udev,
 	    &iface->idesc->bInterfaceNumber, sc->sc_if_xfer,

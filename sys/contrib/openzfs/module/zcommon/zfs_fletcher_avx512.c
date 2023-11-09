@@ -6,7 +6,7 @@
  * You may not use this file except in compliance with the License.
  *
  * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
- * or http://www.opensolaris.org/os/licensing.
+ * or https://opensource.org/licenses/CDDL-1.0.
  * See the License for the specific language governing permissions
  * and limitations under the License.
  *
@@ -27,7 +27,7 @@
 #include <sys/byteorder.h>
 #include <sys/frame.h>
 #include <sys/spa_checksum.h>
-#include <sys/strings.h>
+#include <sys/string.h>
 #include <sys/simd.h>
 #include <zfs_fletcher.h>
 
@@ -35,12 +35,14 @@
 #define	__asm __asm__ __volatile__
 #endif
 
+ZFS_NO_SANITIZE_UNDEFINED
 static void
 fletcher_4_avx512f_init(fletcher_4_ctx_t *ctx)
 {
-	bzero(ctx->avx512, 4 * sizeof (zfs_fletcher_avx512_t));
+	memset(ctx->avx512, 0, 4 * sizeof (zfs_fletcher_avx512_t));
 }
 
+ZFS_NO_SANITIZE_UNDEFINED
 static void
 fletcher_4_avx512f_fini(fletcher_4_ctx_t *ctx, zio_cksum_t *zcp)
 {

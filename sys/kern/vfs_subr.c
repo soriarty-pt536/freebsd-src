@@ -113,6 +113,8 @@ static void	vn_seqc_init(struct vnode *);
 static void	vn_seqc_write_end_free(struct vnode *vp);
 static void	vgonel(struct vnode *);
 static bool	vhold_recycle_free(struct vnode *);
+static void	vdropl_recycle(struct vnode *vp);
+static void	vdrop_recycle(struct vnode *vp);
 static void	vfs_knllock(void *arg);
 static void	vfs_knlunlock(void *arg);
 static void	vfs_knl_assert_lock(void *arg, int what);
@@ -393,7 +395,7 @@ sysctl_try_reclaim_vnode(SYSCTL_HANDLER_ARGS)
 
 	buf[req->newlen] = '\0';
 
-	ndflags = LOCKLEAF | NOFOLLOW | AUDITVNODE1 | SAVENAME;
+	ndflags = LOCKLEAF | NOFOLLOW | AUDITVNODE1;
 	NDINIT(&nd, LOOKUP, ndflags, UIO_SYSSPACE, buf);
 	if ((error = namei(&nd)) != 0)
 		goto out;
@@ -462,7 +464,8 @@ SYSCTL_PROC(_debug, OID_AUTO, ftry_reclaim_vnode,
 /* Shift count for (uintptr_t)vp to initialize vp->v_hash. */
 #define vnsz2log 8
 #ifndef DEBUG_LOCKS
-_Static_assert((sizeof(struct vnode) >= 256) && (sizeof(struct vnode) < 512),
+_Static_assert(sizeof(struct vnode) >= 1UL << vnsz2log &&
+    sizeof(struct vnode) < 1UL << (vnsz2log + 1),
     "vnsz2log needs to be updated");
 #endif
 
@@ -767,17 +770,22 @@ SYSINIT(vfs, SI_SUB_VFS, SI_ORDER_FIRST, vntblinit, NULL);
  *              +->F->D->E
  *
  * The lookup() process for namei("/var") illustrates the process:
- *  VOP_LOOKUP() obtains B while A is held
- *  vfs_busy() obtains a shared lock on F while A and B are held
- *  vput() releases lock on B
- *  vput() releases lock on A
- *  VFS_ROOT() obtains lock on D while shared lock on F is held
- *  vfs_unbusy() releases shared lock on F
- *  vn_lock() obtains lock on deadfs vnode vp_crossmp instead of A.
- *    Attempt to lock A (instead of vp_crossmp) while D is held would
- *    violate the global order, causing deadlocks.
+ *  1. VOP_LOOKUP() obtains B while A is held
+ *  2. vfs_busy() obtains a shared lock on F while A and B are held
+ *  3. vput() releases lock on B
+ *  4. vput() releases lock on A
+ *  5. VFS_ROOT() obtains lock on D while shared lock on F is held
+ *  6. vfs_unbusy() releases shared lock on F
+ *  7. vn_lock() obtains lock on deadfs vnode vp_crossmp instead of A.
+ *     Attempt to lock A (instead of vp_crossmp) while D is held would
+ *     violate the global order, causing deadlocks.
  *
- * dounmount() locks B while F is drained.
+ * dounmount() locks B while F is drained.  Note that for stacked
+ * filesystems, D and B in the example above may be the same lock,
+ * which introdues potential lock order reversal deadlock between
+ * dounmount() and step 5 above.  These filesystems may avoid the LOR
+ * by setting VV_CROSSLOCK on the covered vnode so that lock B will
+ * remain held until after step 5.
  */
 int
 vfs_busy(struct mount *mp, int flags)
@@ -811,8 +819,7 @@ vfs_busy(struct mount *mp, int flags)
 	 * flag in addition to MNTK_UNMOUNT, indicating that mount point is
 	 * about to be really destroyed.  vfs_busy needs to release its
 	 * reference on the mount point in this case and return with ENOENT,
-	 * telling the caller that mount mount it tried to busy is no longer
-	 * valid.
+	 * telling the caller the mount it tried to busy is no longer valid.
 	 */
 	while (mp->mnt_kern_flag & MNTK_UNMOUNT) {
 		KASSERT(TAILQ_EMPTY(&mp->mnt_uppers),
@@ -1206,11 +1213,11 @@ restart:
 		mtx_unlock(&vnode_list_mtx);
 
 		if (vn_start_write(vp, &mp, V_NOWAIT) != 0) {
-			vdrop(vp);
+			vdrop_recycle(vp);
 			goto next_iter_unlocked;
 		}
 		if (VOP_LOCK(vp, LK_EXCLUSIVE|LK_NOWAIT) != 0) {
-			vdrop(vp);
+			vdrop_recycle(vp);
 			vn_finished_write(mp);
 			goto next_iter_unlocked;
 		}
@@ -1221,14 +1228,14 @@ restart:
 		    (vp->v_object != NULL && vp->v_object->handle == vp &&
 		    vp->v_object->resident_page_count > trigger)) {
 			VOP_UNLOCK(vp);
-			vdropl(vp);
+			vdropl_recycle(vp);
 			vn_finished_write(mp);
 			goto next_iter_unlocked;
 		}
 		counter_u64_add(recycles_count, 1);
 		vgonel(vp);
 		VOP_UNLOCK(vp);
-		vdropl(vp);
+		vdropl_recycle(vp);
 		vn_finished_write(mp);
 		done++;
 next_iter_unlocked:
@@ -1308,8 +1315,29 @@ vnlru_free_impl(int count, struct vfsops *mnt_op, struct vnode *mvp)
 		TAILQ_REMOVE(&vnode_list, mvp, v_vnodelist);
 		TAILQ_INSERT_AFTER(&vnode_list, vp, mvp, v_vnodelist);
 		mtx_unlock(&vnode_list_mtx);
-		if (vtryrecycle(vp) == 0)
-			count--;
+		/*
+		 * FIXME: ignores the return value, meaning it may be nothing
+		 * got recycled but it claims otherwise to the caller.
+		 *
+		 * Originally the value started being ignored in 2005 with
+		 * 114a1006a8204aa156e1f9ad6476cdff89cada7f .
+		 *
+		 * Respecting the value can run into significant stalls if most
+		 * vnodes belong to one file system and it has writes
+		 * suspended.  In presence of many threads and millions of
+		 * vnodes they keep contending on the vnode_list_mtx lock only
+		 * to find vnodes they can't recycle.
+		 *
+		 * The solution would be to pre-check if the vnode is likely to
+		 * be recycle-able, but it needs to happen with the
+		 * vnode_list_mtx lock held. This runs into a problem where
+		 * VOP_GETWRITEMOUNT (currently needed to find out about if
+		 * writes are frozen) can take locks which LOR against it.
+		 *
+		 * Check nullfs for one example (null_getwritemount).
+		 */
+		vtryrecycle(vp);
+		count--;
 		mtx_lock(&vnode_list_mtx);
 		vp = mvp;
 	}
@@ -1541,7 +1569,7 @@ vnlru_proc(void)
 		if (usevnodes <= 0)
 			usevnodes = 1;
 		/*
-		 * The trigger value is is chosen to give a conservatively
+		 * The trigger value is chosen to give a conservatively
 		 * large value to ensure that it alone doesn't prevent
 		 * making progress.  The value can easily be so large that
 		 * it is effectively infinite in some congested and
@@ -1612,7 +1640,7 @@ vtryrecycle(struct vnode *vp)
 		CTR2(KTR_VFS,
 		    "%s: impossible to recycle, vp %p lock is already held",
 		    __func__, vp);
-		vdrop(vp);
+		vdrop_recycle(vp);
 		return (EWOULDBLOCK);
 	}
 	/*
@@ -1623,7 +1651,7 @@ vtryrecycle(struct vnode *vp)
 		CTR2(KTR_VFS,
 		    "%s: impossible to recycle, cannot start the write for %p",
 		    __func__, vp);
-		vdrop(vp);
+		vdrop_recycle(vp);
 		return (EBUSY);
 	}
 	/*
@@ -1635,7 +1663,7 @@ vtryrecycle(struct vnode *vp)
 	VI_LOCK(vp);
 	if (vp->v_usecount) {
 		VOP_UNLOCK(vp);
-		vdropl(vp);
+		vdropl_recycle(vp);
 		vn_finished_write(vnmp);
 		CTR2(KTR_VFS,
 		    "%s: impossible to recycle, %p is already referenced",
@@ -1647,7 +1675,7 @@ vtryrecycle(struct vnode *vp)
 		vgonel(vp);
 	}
 	VOP_UNLOCK(vp);
-	vdropl(vp);
+	vdropl_recycle(vp);
 	vn_finished_write(vnmp);
 	return (0);
 }
@@ -1882,19 +1910,23 @@ freevnode(struct vnode *vp)
 	VNASSERT(bo->bo_dirty.bv_cnt == 0, vp, ("dirtybufcnt not 0"));
 	VNASSERT(pctrie_is_empty(&bo->bo_dirty.bv_root), vp,
 	    ("dirty blk trie not empty"));
-	VNASSERT(TAILQ_EMPTY(&vp->v_cache_dst), vp, ("vp has namecache dst"));
-	VNASSERT(LIST_EMPTY(&vp->v_cache_src), vp, ("vp has namecache src"));
-	VNASSERT(vp->v_cache_dd == NULL, vp, ("vp has namecache for .."));
 	VNASSERT(TAILQ_EMPTY(&vp->v_rl.rl_waiters), vp,
 	    ("Dangling rangelock waiters"));
 	VNASSERT((vp->v_iflag & (VI_DOINGINACT | VI_OWEINACT)) == 0, vp,
 	    ("Leaked inactivation"));
 	VI_UNLOCK(vp);
+	cache_assert_no_entries(vp);
+
 #ifdef MAC
 	mac_vnode_destroy(vp);
 #endif
 	if (vp->v_pollinfo != NULL) {
-		vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
+		/*
+		 * Use LK_NOWAIT to shut up witness about the lock. We may get
+		 * here while having another vnode locked when trying to
+		 * satisfy a lookup and needing to recycle.
+		 */
+		VOP_LOCK(vp, LK_EXCLUSIVE | LK_NOWAIT);
 		destroy_vpollinfo(vp->v_pollinfo);
 		VOP_UNLOCK(vp);
 		vp->v_pollinfo = NULL;
@@ -1920,18 +1952,19 @@ delmntque(struct vnode *vp)
 	VNPASS((vp->v_mflag & VMP_LAZYLIST) == 0, vp);
 
 	mp = vp->v_mount;
-	if (mp == NULL)
-		return;
 	MNT_ILOCK(mp);
 	VI_LOCK(vp);
 	vp->v_mount = NULL;
-	VI_UNLOCK(vp);
 	VNASSERT(mp->mnt_nvnodelistsize > 0, vp,
 		("bad mount point vnode list size"));
 	TAILQ_REMOVE(&mp->mnt_nvnodelist, vp, v_nmntvnodes);
 	mp->mnt_nvnodelistsize--;
 	MNT_REL(mp);
 	MNT_IUNLOCK(mp);
+	/*
+	 * The caller expects the interlock to be still held.
+	 */
+	ASSERT_VI_LOCKED(vp, __func__);
 }
 
 static int
@@ -1941,7 +1974,13 @@ insmntque1_int(struct vnode *vp, struct mount *mp, bool dtr)
 	KASSERT(vp->v_mount == NULL,
 		("insmntque: vnode already on per mount vnode list"));
 	VNASSERT(mp != NULL, vp, ("Don't call insmntque(foo, NULL)"));
-	ASSERT_VOP_ELOCKED(vp, "insmntque: non-locked vp");
+	if ((mp->mnt_kern_flag & MNTK_UNLOCKED_INSMNTQUE) == 0) {
+		ASSERT_VOP_ELOCKED(vp, "insmntque: non-locked vp");
+	} else {
+		KASSERT(!dtr,
+		    ("%s: can't have MNTK_UNLOCKED_INSMNTQUE and cleanup",
+		    __func__));
+	}
 
 	/*
 	 * We acquire the vnode interlock early to ensure that the
@@ -3597,8 +3636,8 @@ vdrop(struct vnode *vp)
 	vdropl(vp);
 }
 
-void
-vdropl(struct vnode *vp)
+static void __always_inline
+vdropl_impl(struct vnode *vp, bool enqueue)
 {
 
 	ASSERT_VI_LOCKED(vp, __func__);
@@ -3618,12 +3657,51 @@ vdropl(struct vnode *vp)
 	if (vp->v_mflag & VMP_LAZYLIST) {
 		vunlazy(vp);
 	}
+
+	if (!enqueue) {
+		VI_UNLOCK(vp);
+		return;
+	}
+
 	/*
 	 * Also unlocks the interlock. We can't assert on it as we
 	 * released our hold and by now the vnode might have been
 	 * freed.
 	 */
 	vdbatch_enqueue(vp);
+}
+
+void
+vdropl(struct vnode *vp)
+{
+
+	vdropl_impl(vp, true);
+}
+
+/*
+ * vdrop a vnode when recycling
+ *
+ * This is a special case routine only to be used when recycling, differs from
+ * regular vdrop by not requeieing the vnode on LRU.
+ *
+ * Consider a case where vtryrecycle continuously fails with all vnodes (due to
+ * e.g., frozen writes on the filesystem), filling the batch and causing it to
+ * be requeued. Then vnlru will end up revisiting the same vnodes. This is a
+ * loop which can last for as long as writes are frozen.
+ */
+static void
+vdropl_recycle(struct vnode *vp)
+{
+
+	vdropl_impl(vp, false);
+}
+
+static void
+vdrop_recycle(struct vnode *vp)
+{
+
+	VI_LOCK(vp);
+	vdropl_recycle(vp);
 }
 
 /*
@@ -3879,7 +3957,7 @@ vgone(struct vnode *vp)
  * Notify upper mounts about reclaimed or unlinked vnode.
  */
 void
-vfs_notify_upper(struct vnode *vp, int event)
+vfs_notify_upper(struct vnode *vp, enum vfs_notify_upper_type event)
 {
 	struct mount *mp;
 	struct mount_upper_node *ump;
@@ -3902,9 +3980,6 @@ vfs_notify_upper(struct vnode *vp, int event)
 			break;
 		case VFS_NOTIFY_UPPER_UNLINK:
 			VFS_UNLINK_LOWERVP(ump->mp, vp);
-			break;
-		default:
-			KASSERT(0, ("invalid event %d", event));
 			break;
 		}
 		MNT_ILOCK(mp);
@@ -4044,17 +4119,23 @@ vgonel(struct vnode *vp)
 	/*
 	 * Clear the advisory locks and wake up waiting threads.
 	 */
-	(void)VOP_ADVLOCKPURGE(vp);
-	vp->v_lockf = NULL;
+	if (vp->v_lockf != NULL) {
+		(void)VOP_ADVLOCKPURGE(vp);
+		vp->v_lockf = NULL;
+	}
 	/*
 	 * Delete from old mount point vnode list.
 	 */
-	delmntque(vp);
+	if (vp->v_mount == NULL) {
+		VI_LOCK(vp);
+	} else {
+		delmntque(vp);
+		ASSERT_VI_LOCKED(vp, "vgonel 2");
+	}
 	/*
 	 * Done with purge, reset to the standard lock and invalidate
 	 * the vnode.
 	 */
-	VI_LOCK(vp);
 	vp->v_vnlock = &vp->v_lock;
 	vp->v_op = &dead_vnodeops;
 	vp->v_type = VBAD;
@@ -4205,7 +4286,7 @@ vn_printf(struct vnode *vp, const char *fmt, ...)
  * List all of the locked vnodes in the system.
  * Called when debugging the kernel.
  */
-DB_SHOW_COMMAND(lockedvnods, lockedvnodes)
+DB_SHOW_COMMAND_FLAGS(lockedvnods, lockedvnodes, DB_CMD_MEMSAFE)
 {
 	struct mount *mp;
 	struct vnode *vp;
@@ -4335,6 +4416,7 @@ DB_SHOW_COMMAND(mount, db_show_mount)
 	MNT_KERN_FLAG(MNTK_UNMOUNTF);
 	MNT_KERN_FLAG(MNTK_ASYNC);
 	MNT_KERN_FLAG(MNTK_SOFTDEP);
+	MNT_KERN_FLAG(MNTK_NOMSYNC);
 	MNT_KERN_FLAG(MNTK_DRAINING);
 	MNT_KERN_FLAG(MNTK_REFEXPIRE);
 	MNT_KERN_FLAG(MNTK_EXTENDED_SHARED);
@@ -4342,8 +4424,9 @@ DB_SHOW_COMMAND(mount, db_show_mount)
 	MNT_KERN_FLAG(MNTK_NO_IOPF);
 	MNT_KERN_FLAG(MNTK_RECURSE);
 	MNT_KERN_FLAG(MNTK_UPPER_WAITER);
-	MNT_KERN_FLAG(MNTK_LOOKUP_EXCL_DOTDOT);
+	MNT_KERN_FLAG(MNTK_UNLOCKED_INSMNTQUE);
 	MNT_KERN_FLAG(MNTK_USES_BCACHE);
+	MNT_KERN_FLAG(MNTK_VMSETSIZE_BUG);
 	MNT_KERN_FLAG(MNTK_FPLOOKUP);
 	MNT_KERN_FLAG(MNTK_TASKQUEUE_WAITER);
 	MNT_KERN_FLAG(MNTK_NOASYNC);
@@ -4352,6 +4435,7 @@ DB_SHOW_COMMAND(mount, db_show_mount)
 	MNT_KERN_FLAG(MNTK_SUSPEND);
 	MNT_KERN_FLAG(MNTK_SUSPEND2);
 	MNT_KERN_FLAG(MNTK_SUSPENDED);
+	MNT_KERN_FLAG(MNTK_NULL_NOCACHE);
 	MNT_KERN_FLAG(MNTK_LOOKUP_SHARED);
 #undef MNT_KERN_FLAG
 	if (flags != 0) {
@@ -4974,7 +5058,7 @@ vfs_allocate_syncvnode(struct mount *mp)
 	vp->v_type = VNON;
 	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
 	vp->v_vflag |= VV_FORCEINSMQ;
-	error = insmntque(vp, mp);
+	error = insmntque1(vp, mp);
 	if (error != 0)
 		panic("vfs_allocate_syncvnode: insmntque() failed");
 	vp->v_vflag &= ~VV_FORCEINSMQ;
@@ -5911,6 +5995,7 @@ vop_rmdir_post(void *ap, int rc)
 	vn_seqc_write_end(dvp);
 	vn_seqc_write_end(vp);
 	if (!rc) {
+		vp->v_vflag |= VV_UNLINKED;
 		VFS_KNOTE_LOCKED(dvp, NOTE_WRITE | NOTE_LINK);
 		VFS_KNOTE_LOCKED(vp, NOTE_DELETE);
 	}

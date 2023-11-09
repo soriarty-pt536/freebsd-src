@@ -52,9 +52,10 @@ __FBSDID("$FreeBSD$");
 #include <sys/asan.h>
 #include <sys/bio.h>
 #include <sys/bitset.h>
+#include <sys/boottrace.h>
+#include <sys/buf.h>
 #include <sys/conf.h>
 #include <sys/counter.h>
-#include <sys/buf.h>
 #include <sys/devicestat.h>
 #include <sys/eventhandler.h>
 #include <sys/fail.h>
@@ -1466,10 +1467,12 @@ bufshutdown(int show_busybufs)
 		 * Failed to sync all blocks. Indicate this and don't
 		 * unmount filesystems (thus forcing an fsck on reboot).
 		 */
+		BOOTTRACE("shutdown failed to sync buffers");
 		printf("Giving up on %d buffers\n", nbusy);
 		DELAY(5000000);	/* 5 seconds */
 		swapoff_all();
 	} else {
+		BOOTTRACE("shutdown sync complete");
 		if (!first_buf_printf)
 			printf("Final sync complete\n");
 
@@ -1489,6 +1492,7 @@ bufshutdown(int show_busybufs)
 			swapoff_all();
 			vfs_unmountall();
 		}
+		BOOTTRACE("shutdown unmounted all filesystems");
 	}
 	DELAY(100000);		/* wait for console output to finish */
 }
@@ -1718,7 +1722,7 @@ buf_alloc(struct bufdomain *bd)
 	if (freebufs == bd->bd_lofreebuffers)
 		bufspace_daemon_wakeup(bd);
 
-	error = BUF_LOCK(bp, LK_EXCLUSIVE | LK_NOWAIT, NULL);
+	error = BUF_LOCK(bp, LK_EXCLUSIVE | LK_NOWITNESS, NULL);
 	KASSERT(error == 0, ("%s: BUF_LOCK on free buf %p: %d.", __func__, bp,
 	    error));
 	(void)error;
@@ -3423,7 +3427,7 @@ buf_daemon_shutdown(void *arg __unused, int howto __unused)
 }
 
 static void
-buf_daemon()
+buf_daemon(void)
 {
 	struct bufdomain *bd;
 	int speedupreq;
@@ -4848,7 +4852,8 @@ vfs_bio_set_valid(struct buf *bp, int base, int size)
 void
 vfs_bio_clrbuf(struct buf *bp) 
 {
-	int i, j, mask, sa, ea, slide;
+	int i, j, sa, ea, slide, zbits;
+	vm_page_bits_t mask;
 
 	if ((bp->b_flags & (B_VMIO | B_MALLOC)) != B_VMIO) {
 		clrbuf(bp);
@@ -4867,7 +4872,9 @@ vfs_bio_clrbuf(struct buf *bp)
 		if (bp->b_pages[i] == bogus_page)
 			continue;
 		j = sa / DEV_BSIZE;
-		mask = ((1 << ((ea - sa) / DEV_BSIZE)) - 1) << j;
+		zbits = (sizeof(vm_page_bits_t) * NBBY) -
+		    (ea - sa) / DEV_BSIZE;
+		mask = (VM_PAGE_BITS_ALL >> zbits) << j;
 		if ((bp->b_pages[i]->valid & mask) == mask)
 			continue;
 		if ((bp->b_pages[i]->valid & mask) == 0)
@@ -5477,7 +5484,7 @@ DB_SHOW_COMMAND(buffer, db_show_buffer)
 	db_printf(" ");
 }
 
-DB_SHOW_COMMAND(bufqueues, bufqueues)
+DB_SHOW_COMMAND_FLAGS(bufqueues, bufqueues, DB_CMD_MEMSAFE)
 {
 	struct bufdomain *bd;
 	struct buf *bp;
@@ -5543,7 +5550,7 @@ DB_SHOW_COMMAND(bufqueues, bufqueues)
 	}
 }
 
-DB_SHOW_COMMAND(lockedbufs, lockedbufs)
+DB_SHOW_COMMAND_FLAGS(lockedbufs, lockedbufs, DB_CMD_MEMSAFE)
 {
 	struct buf *bp;
 	int i;
@@ -5581,7 +5588,7 @@ DB_SHOW_COMMAND(vnodebufs, db_show_vnodebufs)
 	}
 }
 
-DB_COMMAND(countfreebufs, db_coundfreebufs)
+DB_COMMAND_FLAGS(countfreebufs, db_coundfreebufs, DB_CMD_MEMSAFE)
 {
 	struct buf *bp;
 	int i, used = 0, nfree = 0;

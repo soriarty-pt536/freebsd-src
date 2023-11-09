@@ -34,6 +34,7 @@
 #include <errno.h>
 #include <poll.h>
 #include <pthread.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -115,12 +116,16 @@ libusb_set_nonblocking(int f)
 	fcntl(f, F_SETFL, flags);
 }
 
-static void
-libusb10_wakeup_event_loop(libusb_context *ctx)
+void
+libusb_interrupt_event_handler(libusb_context *ctx)
 {
-	uint8_t dummy = 0;
+	uint8_t dummy;
 	int err;
 
+	if (ctx == NULL)
+		return;
+
+	dummy = 0;
 	err = write(ctx->ctrl_pipe[1], &dummy, sizeof(dummy));
 	if (err < (int)sizeof(dummy)) {
 		/* ignore error, if any */
@@ -225,6 +230,8 @@ libusb_init(libusb_context **context)
 		*context = ctx;
 
 	DPRINTF(ctx, LIBUSB_DEBUG_FUNCTION, "libusb_init complete");
+
+	signal(SIGPIPE, SIG_IGN);
 
 	return (0);
 }
@@ -542,7 +549,7 @@ libusb_open(libusb_device *dev, libusb_device_handle **devh)
 	    POLLOUT | POLLRDNORM | POLLWRNORM);
 
 	/* make sure our event loop detects the new device */
-	libusb10_wakeup_event_loop(ctx);
+	libusb_interrupt_event_handler(ctx);
 
 	*devh = pdev;
 
@@ -611,7 +618,7 @@ libusb_close(struct libusb20_device *pdev)
 	libusb_unref_device(dev);
 
 	/* make sure our event loop detects the closed device */
-	libusb10_wakeup_event_loop(ctx);
+	libusb_interrupt_event_handler(ctx);
 }
 
 libusb_device *
@@ -1440,7 +1447,7 @@ found:
 failure:
 	libusb10_complete_transfer(pxfer0, sxfer, LIBUSB_TRANSFER_ERROR);
 	/* make sure our event loop spins the done handler */
-	libusb10_wakeup_event_loop(dev->ctx);
+	libusb_interrupt_event_handler(dev->ctx);
 }
 
 /* The following function must be called unlocked */
@@ -1552,7 +1559,7 @@ libusb_cancel_transfer(struct libusb_transfer *uxfer)
 		libusb10_complete_transfer(NULL,
 		    sxfer, LIBUSB_TRANSFER_CANCELLED);
 		/* make sure our event loop spins the done handler */
-		libusb10_wakeup_event_loop(dev->ctx);
+		libusb_interrupt_event_handler(dev->ctx);
 	} else if (pxfer0 == NULL || pxfer1 == NULL) {
 		/* not started */
 		retval = LIBUSB_ERROR_NOT_FOUND;
@@ -1563,7 +1570,7 @@ libusb_cancel_transfer(struct libusb_transfer *uxfer)
 			/* clear transfer pointer */
 			libusb20_tr_set_priv_sc1(pxfer0, NULL);
 			/* make sure our event loop spins the done handler */
-			libusb10_wakeup_event_loop(dev->ctx);
+			libusb_interrupt_event_handler(dev->ctx);
 		} else {
 			libusb20_tr_stop(pxfer0);
 			/* make sure the queue doesn't stall */
@@ -1577,7 +1584,7 @@ libusb_cancel_transfer(struct libusb_transfer *uxfer)
 			/* clear transfer pointer */
 			libusb20_tr_set_priv_sc1(pxfer1, NULL);
 			/* make sure our event loop spins the done handler */
-			libusb10_wakeup_event_loop(dev->ctx);
+			libusb_interrupt_event_handler(dev->ctx);
 		} else {
 			libusb20_tr_stop(pxfer1);
 			/* make sure the queue doesn't stall */

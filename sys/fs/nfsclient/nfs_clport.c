@@ -127,7 +127,7 @@ newnfs_vncmpf(struct vnode *vp, void *arg)
 int
 nfscl_nget(struct mount *mntp, struct vnode *dvp, struct nfsfh *nfhp,
     struct componentname *cnp, struct thread *td, struct nfsnode **npp,
-    void *stuff, int lkflags)
+    int lkflags)
 {
 	struct nfsnode *np, *dnp;
 	struct vnode *vp, *nvp;
@@ -433,7 +433,7 @@ ncl_copy_vattr(struct vattr *dst, struct vattr *src)
  */
 int
 nfscl_loadattrcache(struct vnode **vpp, struct nfsvattr *nap, void *nvaper,
-    void *stuff, int writeattr, int dontshrink)
+    int writeattr, int dontshrink)
 {
 	struct vnode *vp = *vpp;
 	struct vattr *vap, *nvap = &nap->na_vattr, *vaper = nvaper;
@@ -781,7 +781,7 @@ nfscl_start_renewthread(struct nfsclclient *clp)
  */
 int
 nfscl_wcc_data(struct nfsrv_descript *nd, struct vnode *vp,
-    struct nfsvattr *nap, int *flagp, int *wccflagp, void *stuff)
+    struct nfsvattr *nap, int *flagp, int *wccflagp, uint64_t *repsizep)
 {
 	u_int32_t *tl;
 	struct nfsnode *np = VTONFS(vp);
@@ -804,7 +804,7 @@ nfscl_wcc_data(struct nfsrv_descript *nd, struct vnode *vp,
 				NFSUNLOCKNODE(np);
 			}
 		}
-		error = nfscl_postop_attr(nd, nap, flagp, stuff);
+		error = nfscl_postop_attr(nd, nap, flagp);
 		if (wccflagp != NULL && *flagp == 0)
 			*wccflagp = 0;
 	} else if ((nd->nd_flag & (ND_NOMOREDATA | ND_NFSV4 | ND_V4WCCATTR))
@@ -820,6 +820,8 @@ nfscl_wcc_data(struct nfsrv_descript *nd, struct vnode *vp,
 		NFSM_DISSECT(tl, u_int32_t *, 2 * NFSX_UNSIGNED);
 		if (*++tl)
 			nd->nd_flag |= ND_NOMOREDATA;
+		if (repsizep != NULL)
+			*repsizep = nfsva.na_size;
 		if (wccflagp != NULL &&
 		    nfsva.na_vattr.va_mtime.tv_sec != 0) {
 			NFSLOCKNODE(np);
@@ -838,8 +840,7 @@ nfsmout:
  * Get postop attributes.
  */
 int
-nfscl_postop_attr(struct nfsrv_descript *nd, struct nfsvattr *nap, int *retp,
-    void *stuff)
+nfscl_postop_attr(struct nfsrv_descript *nd, struct nfsvattr *nap, int *retp)
 {
 	u_int32_t *tl;
 	int error = 0;
@@ -881,7 +882,7 @@ nfsmout:
  */
 int
 nfscl_request(struct nfsrv_descript *nd, struct vnode *vp, NFSPROC_T *p,
-    struct ucred *cred, void *stuff)
+    struct ucred *cred)
 {
 	int ret, vers;
 	struct nfsmount *nmp;
@@ -1013,18 +1014,18 @@ nfscl_getmyip(struct nfsmount *nmp, struct in6_addr *paddr, int *isinet6p)
 		NET_EPOCH_ENTER(et);
 		CURVNET_SET(CRED_TO_VNET(nmp->nm_sockreq.nr_cred));
 		nh = fib4_lookup(fibnum, sin->sin_addr, 0, NHR_NONE, 0);
-		CURVNET_RESTORE();
-		if (nh != NULL)
+		if (nh != NULL) {
 			addr = IA_SIN(ifatoia(nh->nh_ifa))->sin_addr;
+			if (IN_LOOPBACK(ntohl(addr.s_addr))) {
+				/* Ignore loopback addresses */
+				nh = NULL;
+			}
+		}
+		CURVNET_RESTORE();
 		NET_EPOCH_EXIT(et);
+
 		if (nh == NULL)
 			return (NULL);
-
-		if (IN_LOOPBACK(ntohl(addr.s_addr))) {
-			/* Ignore loopback addresses */
-			return (NULL);
-		}
-
 		*isinet6p = 0;
 		*((struct in_addr *)paddr) = addr;
 

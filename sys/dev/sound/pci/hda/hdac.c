@@ -113,6 +113,13 @@ static const struct {
 	{ HDA_INTEL_TGLK,    "Intel Tiger Lake",	0, 0 },
 	{ HDA_INTEL_GMLK,    "Intel Gemini Lake",	0, 0 },
 	{ HDA_INTEL_ALLK,    "Intel Alder Lake",	0, 0 },
+	{ HDA_INTEL_ALLKM,   "Intel Alder Lake-M",	0, 0 },
+	{ HDA_INTEL_ALLKN,   "Intel Alder Lake-N",	0, 0 },
+	{ HDA_INTEL_ALLKP1,  "Intel Alder Lake-P",	0, 0 },
+	{ HDA_INTEL_ALLKP2,  "Intel Alder Lake-P",	0, 0 },
+	{ HDA_INTEL_ALLKPS,  "Intel Alder Lake-PS",	0, 0 },
+	{ HDA_INTEL_RPTLK1,  "Intel Raptor Lake-P",	0, 0 },
+	{ HDA_INTEL_RPTLK2,  "Intel Raptor Lake-P",	0, 0 },
 	{ HDA_INTEL_82801F,  "Intel 82801F",	0, 0 },
 	{ HDA_INTEL_63XXESB, "Intel 631x/632xESB",	0, 0 },
 	{ HDA_INTEL_82801G,  "Intel 82801G",	0, 0 },
@@ -193,6 +200,7 @@ static const struct {
 	{ HDA_AMD_HUDSON2,   "AMD Hudson-2",	0, 0 },
 	{ HDA_RDC_M3010,     "RDC M3010",	0, 0 },
 	{ HDA_VIA_VT82XX,    "VIA VT8251/8237A",0, 0 },
+	{ HDA_VMWARE,        "VMware",		0, 0 },
 	{ HDA_SIS_966,       "SiS 966/968",	0, 0 },
 	{ HDA_ULI_M5461,     "ULI M5461",	0, 0 },
 	/* Unknown */
@@ -202,6 +210,7 @@ static const struct {
 	{ HDA_AMD_ALL,    "AMD",		0, 0 },
 	{ HDA_CREATIVE_ALL,    "Creative",	0, 0 },
 	{ HDA_VIA_ALL,    "VIA",		0, 0 },
+	{ HDA_VMWARE_ALL, "VMware",		0, 0 },
 	{ HDA_SIS_ALL,    "SiS",		0, 0 },
 	{ HDA_ULI_ALL,    "ULI",		0, 0 },
 };
@@ -384,13 +393,13 @@ hdac_intr_handler(void *context)
 	 * re-examine GIS then we can leave it set and never get an interrupt
 	 * again.
 	 */
+	hdac_lock(sc);
 	intsts = HDAC_READ_4(&sc->mem, HDAC_INTSTS);
-	while ((intsts & HDAC_INTSTS_GIS) != 0) {
-		hdac_lock(sc);
+	while (intsts != 0xffffffff && (intsts & HDAC_INTSTS_GIS) != 0) {
 		hdac_one_intr(sc, intsts);
-		hdac_unlock(sc);
 		intsts = HDAC_READ_4(&sc->mem, HDAC_INTSTS);
 	}
+	hdac_unlock(sc);
 }
 
 static void
@@ -2170,6 +2179,4 @@ static driver_t hdac_driver = {
 	sizeof(struct hdac_softc),
 };
 
-static devclass_t hdac_devclass;
-
-DRIVER_MODULE(snd_hda, pci, hdac_driver, hdac_devclass, NULL, NULL);
+DRIVER_MODULE(snd_hda, pci, hdac_driver, NULL, NULL);

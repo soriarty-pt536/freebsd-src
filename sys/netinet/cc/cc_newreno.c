@@ -99,7 +99,7 @@ static size_t	newreno_data_sz(void);
 
 VNET_DECLARE(uint32_t, newreno_beta);
 #define V_newreno_beta VNET(newreno_beta)
-VNET_DEFINE(uint32_t, newreno_beta_ecn) = 80;
+VNET_DECLARE(uint32_t, newreno_beta_ecn);
 #define V_newreno_beta_ecn VNET(newreno_beta_ecn)
 
 struct cc_algo newreno_cc_algo = {
@@ -571,6 +571,7 @@ newreno_rttsample(struct cc_var *ccv, uint32_t usec_rtt, uint32_t rxtcnt, uint32
 	}
 	if ((nreno->css_rttsample_count >= hystart_n_rttsamples) &&
 	    (nreno->css_current_round_minrtt != 0xffffffff) &&
+	    (nreno->css_current_round_minrtt < nreno->css_baseline_minrtt) &&
 	    (nreno->css_lastround_minrtt != 0xffffffff)) {
 		/*
 		 * We were in CSS and the RTT is now less, we

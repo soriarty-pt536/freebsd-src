@@ -1335,7 +1335,6 @@ bootpc_decode_reply(struct nfsv3_diskless *nd, struct bootpc_ifcontext *ifctx,
     struct bootpc_globalcontext *gctx)
 {
 	char *p, *s;
-	unsigned int ip;
 
 	ifctx->gotgw = 0;
 	ifctx->gotnetmask = 0;
@@ -1345,8 +1344,6 @@ bootpc_decode_reply(struct nfsv3_diskless *nd, struct bootpc_ifcontext *ifctx,
 	clear_sinaddr(&ifctx->gw);
 
 	ifctx->myaddr.sin_addr = ifctx->reply.yiaddr;
-
-	ip = ntohl(ifctx->myaddr.sin_addr.s_addr);
 
 	printf("%s at ", ifctx->ireq.ifr_name);
 	print_sin_addr(&ifctx->myaddr);
@@ -1504,7 +1501,7 @@ bootpc_decode_reply(struct nfsv3_diskless *nd, struct bootpc_ifcontext *ifctx,
 void
 bootpc_init(void)
 {
-	struct bootpc_ifcontext *ifctx;		/* Interface BOOTP contexts */
+	struct bootpc_ifcontext *ifctx = NULL;	/* Interface BOOTP contexts */
 	struct bootpc_globalcontext *gctx; 	/* Global BOOTP context */
 	struct ifnet *ifp;
 	struct sockaddr_dl *sdl;
@@ -1517,6 +1514,7 @@ bootpc_init(void)
 	struct thread *td;
 	int timeout;
 	int delay;
+	char *s;
 
 	timeout = BOOTP_IFACE_WAIT_TIMEOUT * hz;
 	delay = hz / 10;
@@ -1529,6 +1527,21 @@ bootpc_init(void)
 	 */
 	if (nfs_diskless_valid != 0)
 		return;
+
+	/*
+	 * If "vfs.root.mountfrom" is set and the value is something other
+	 * than "nfs:", it means the user doesn't want to mount root via nfs,
+	 * there's no reason to continue with bootpc
+	 */
+	if ((s = kern_getenv("vfs.root.mountfrom")) != NULL) {
+		if ((strncmp(s, "nfs:", 4)) != 0) {
+			printf("%s: vfs.root.mountfrom set to %s. "
+			       "BOOTP aborted.\n", __func__, s);
+			freeenv(s);
+			return;
+		}
+		freeenv(s);
+	}
 
 	gctx = malloc(sizeof(*gctx), M_TEMP, M_WAITOK | M_ZERO);
 	STAILQ_INIT(&gctx->interfaces);
@@ -1574,9 +1587,13 @@ bootpc_init(void)
 		}
 		ifcnt++;
 	}
+
 	IFNET_RUNLOCK();
-	if (ifcnt == 0)
-		panic("%s: no eligible interfaces", __func__);
+	if (ifcnt == 0) {
+		printf("WARNING: BOOTP found no eligible network interfaces, skipping!\n");
+		goto out;
+	}
+
 	for (; ifcnt > 0; ifcnt--)
 		allocifctx(gctx);
 #endif

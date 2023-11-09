@@ -493,7 +493,10 @@ MLINKS+=rand48.3 _rand48.3 \
 	rand48.3 seed48.3 \
 	rand48.3 srand48.3
 MLINKS+=recv.2 recvmmsg.2
-MLINKS+=scandir.3 alphasort.3
+MLINKS+=scandir.3 alphasort.3 \
+	scandir.3 scandirat.3 \
+	scandir.3 scandir_b.3 \
+	scandir.3 versionsort.3
 MLINKS+=sem_open.3 sem_close.3 \
 	sem_open.3 sem_unlink.3
 MLINKS+=sem_wait.3 sem_trywait.3
@@ -573,8 +576,8 @@ install-passwd: .PHONY
 	${PWD_MKDB_CMD} -i -p -d ${DESTDIR}/etc ${DESTDIR}/etc/master.passwd
 .if defined(NO_ROOT) && defined(METALOG)
 	( \
-		echo "./etc/pwd.db type=file mode=0644 uname=root gname=wheel"; \
-		echo "./etc/spwd.db type=file mode=0600 uname=root gname=wheel"; \
-		echo "./etc/passwd type=file mode=0644 uname=root gname=wheel"; \
+		echo ".${DISTBASE}/etc/pwd.db type=file mode=0644 uname=root gname=wheel"; \
+		echo ".${DISTBASE}/etc/spwd.db type=file mode=0600 uname=root gname=wheel"; \
+		echo ".${DISTBASE}/etc/passwd type=file mode=0644 uname=root gname=wheel"; \
 	) | cat -l >> ${METALOG}
 .endif

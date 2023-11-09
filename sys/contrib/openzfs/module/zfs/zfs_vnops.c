@@ -6,7 +6,7 @@
  * You may not use this file except in compliance with the License.
  *
  * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
- * or http://www.opensolaris.org/os/licensing.
+ * or https://opensource.org/licenses/CDDL-1.0.
  * See the License for the specific language governing permissions
  * and limitations under the License.
  *
@@ -61,19 +61,23 @@ static ulong_t zfs_fsync_sync_cnt = 4;
 int
 zfs_fsync(znode_t *zp, int syncflag, cred_t *cr)
 {
+	int error = 0;
 	zfsvfs_t *zfsvfs = ZTOZSB(zp);
 
 	(void) tsd_set(zfs_fsyncer_key, (void *)zfs_fsync_sync_cnt);
 
 	if (zfsvfs->z_os->os_sync != ZFS_SYNC_DISABLED) {
-		ZFS_ENTER(zfsvfs);
-		ZFS_VERIFY_ZP(zp);
+		if ((error = zfs_enter_verify_zp(zfsvfs, zp, FTAG)) != 0)
+			goto out;
+		atomic_inc_32(&zp->z_sync_writes_cnt);
 		zil_commit(zfsvfs->z_log, zp->z_id);
-		ZFS_EXIT(zfsvfs);
+		atomic_dec_32(&zp->z_sync_writes_cnt);
+		zfs_exit(zfsvfs, FTAG);
 	}
+out:
 	tsd_set(zfs_fsyncer_key, NULL);
 
-	return (0);
+	return (error);
 }
 
 
@@ -144,32 +148,31 @@ zfs_holey(znode_t *zp, ulong_t cmd, loff_t *off)
 	zfsvfs_t *zfsvfs = ZTOZSB(zp);
 	int error;
 
-	ZFS_ENTER(zfsvfs);
-	ZFS_VERIFY_ZP(zp);
+	if ((error = zfs_enter_verify_zp(zfsvfs, zp, FTAG)) != 0)
+		return (error);
 
 	error = zfs_holey_common(zp, cmd, off);
 
-	ZFS_EXIT(zfsvfs);
+	zfs_exit(zfsvfs, FTAG);
 	return (error);
 }
 #endif /* SEEK_HOLE && SEEK_DATA */
 
-/*ARGSUSED*/
 int
 zfs_access(znode_t *zp, int mode, int flag, cred_t *cr)
 {
 	zfsvfs_t *zfsvfs = ZTOZSB(zp);
 	int error;
 
-	ZFS_ENTER(zfsvfs);
-	ZFS_VERIFY_ZP(zp);
+	if ((error = zfs_enter_verify_zp(zfsvfs, zp, FTAG)) != 0)
+		return (error);
 
 	if (flag & V_ACE_MASK)
 		error = zfs_zaccess(zp, mode, flag, B_FALSE, cr);
 	else
 		error = zfs_zaccess_rwx(zp, mode, flag, cr);
 
-	ZFS_EXIT(zfsvfs);
+	zfs_exit(zfsvfs, FTAG);
 	return (error);
 }
 
@@ -192,25 +195,25 @@ static unsigned long zfs_vnops_read_chunk_size = 1024 * 1024; /* Tunable */
  * Side Effects:
  *	inode - atime updated if byte count > 0
  */
-/* ARGSUSED */
 int
 zfs_read(struct znode *zp, zfs_uio_t *uio, int ioflag, cred_t *cr)
 {
+	(void) cr;
 	int error = 0;
 	boolean_t frsync = B_FALSE;
 
 	zfsvfs_t *zfsvfs = ZTOZSB(zp);
-	ZFS_ENTER(zfsvfs);
-	ZFS_VERIFY_ZP(zp);
+	if ((error = zfs_enter_verify_zp(zfsvfs, zp, FTAG)) != 0)
+		return (error);
 
 	if (zp->z_pflags & ZFS_AV_QUARANTINED) {
-		ZFS_EXIT(zfsvfs);
+		zfs_exit(zfsvfs, FTAG);
 		return (SET_ERROR(EACCES));
 	}
 
 	/* We don't copy out anything useful for directories. */
 	if (Z_ISDIR(ZTOTYPE(zp))) {
-		ZFS_EXIT(zfsvfs);
+		zfs_exit(zfsvfs, FTAG);
 		return (SET_ERROR(EISDIR));
 	}
 
@@ -218,7 +221,7 @@ zfs_read(struct znode *zp, zfs_uio_t *uio, int ioflag, cred_t *cr)
 	 * Validate file offset
 	 */
 	if (zfs_uio_offset(uio) < (offset_t)0) {
-		ZFS_EXIT(zfsvfs);
+		zfs_exit(zfsvfs, FTAG);
 		return (SET_ERROR(EINVAL));
 	}
 
@@ -226,7 +229,7 @@ zfs_read(struct znode *zp, zfs_uio_t *uio, int ioflag, cred_t *cr)
 	 * Fasttrack empty reads
 	 */
 	if (zfs_uio_resid(uio) == 0) {
-		ZFS_EXIT(zfsvfs);
+		zfs_exit(zfsvfs, FTAG);
 		return (0);
 	}
 
@@ -311,8 +314,63 @@ out:
 	zfs_rangelock_exit(lr);
 
 	ZFS_ACCESSTIME_STAMP(zfsvfs, zp);
-	ZFS_EXIT(zfsvfs);
+	zfs_exit(zfsvfs, FTAG);
 	return (error);
+}
+
+static void
+zfs_clear_setid_bits_if_necessary(zfsvfs_t *zfsvfs, znode_t *zp, cred_t *cr,
+    uint64_t *clear_setid_bits_txgp, dmu_tx_t *tx)
+{
+	zilog_t *zilog = zfsvfs->z_log;
+	const uint64_t uid = KUID_TO_SUID(ZTOUID(zp));
+
+	ASSERT(clear_setid_bits_txgp != NULL);
+	ASSERT(tx != NULL);
+
+	/*
+	 * Clear Set-UID/Set-GID bits on successful write if not
+	 * privileged and at least one of the execute bits is set.
+	 *
+	 * It would be nice to do this after all writes have
+	 * been done, but that would still expose the ISUID/ISGID
+	 * to another app after the partial write is committed.
+	 *
+	 * Note: we don't call zfs_fuid_map_id() here because
+	 * user 0 is not an ephemeral uid.
+	 */
+	mutex_enter(&zp->z_acl_lock);
+	if ((zp->z_mode & (S_IXUSR | (S_IXUSR >> 3) | (S_IXUSR >> 6))) != 0 &&
+	    (zp->z_mode & (S_ISUID | S_ISGID)) != 0 &&
+	    secpolicy_vnode_setid_retain(zp, cr,
+	    ((zp->z_mode & S_ISUID) != 0 && uid == 0)) != 0) {
+		uint64_t newmode;
+
+		zp->z_mode &= ~(S_ISUID | S_ISGID);
+		newmode = zp->z_mode;
+		(void) sa_update(zp->z_sa_hdl, SA_ZPL_MODE(zfsvfs),
+		    (void *)&newmode, sizeof (uint64_t), tx);
+
+		mutex_exit(&zp->z_acl_lock);
+
+		/*
+		 * Make sure SUID/SGID bits will be removed when we replay the
+		 * log. If the setid bits are keep coming back, don't log more
+		 * than one TX_SETATTR per transaction group.
+		 */
+		if (*clear_setid_bits_txgp != dmu_tx_get_txg(tx)) {
+			vattr_t va = {0};
+
+			va.va_mask = ATTR_MODE;
+			va.va_nodeid = zp->z_id;
+			va.va_mode = newmode;
+			zfs_log_setattr(zilog, tx, TX_SETATTR, zp, &va,
+			    ATTR_MODE, NULL);
+			*clear_setid_bits_txgp = dmu_tx_get_txg(tx);
+		}
+	} else {
+		mutex_exit(&zp->z_acl_lock);
+	}
 }
 
 /*
@@ -333,13 +391,12 @@ out:
  * Timestamps:
  *	ip - ctime|mtime updated if byte count > 0
  */
-
-/* ARGSUSED */
 int
 zfs_write(znode_t *zp, zfs_uio_t *uio, int ioflag, cred_t *cr)
 {
 	int error = 0, error1;
 	ssize_t start_resid = zfs_uio_resid(uio);
+	uint64_t clear_setid_bits_txg = 0;
 
 	/*
 	 * Fasttrack empty write
@@ -349,8 +406,8 @@ zfs_write(znode_t *zp, zfs_uio_t *uio, int ioflag, cred_t *cr)
 		return (0);
 
 	zfsvfs_t *zfsvfs = ZTOZSB(zp);
-	ZFS_ENTER(zfsvfs);
-	ZFS_VERIFY_ZP(zp);
+	if ((error = zfs_enter_verify_zp(zfsvfs, zp, FTAG)) != 0)
+		return (error);
 
 	sa_bulk_attr_t bulk[4];
 	int count = 0;
@@ -367,7 +424,7 @@ zfs_write(znode_t *zp, zfs_uio_t *uio, int ioflag, cred_t *cr)
 	 * so check it explicitly here.
 	 */
 	if (zfs_is_readonly(zfsvfs)) {
-		ZFS_EXIT(zfsvfs);
+		zfs_exit(zfsvfs, FTAG);
 		return (SET_ERROR(EROFS));
 	}
 
@@ -379,7 +436,7 @@ zfs_write(znode_t *zp, zfs_uio_t *uio, int ioflag, cred_t *cr)
 	if ((zp->z_pflags & ZFS_IMMUTABLE) ||
 	    ((zp->z_pflags & ZFS_APPENDONLY) && !(ioflag & O_APPEND) &&
 	    (zfs_uio_offset(uio) < zp->z_size))) {
-		ZFS_EXIT(zfsvfs);
+		zfs_exit(zfsvfs, FTAG);
 		return (SET_ERROR(EPERM));
 	}
 
@@ -388,7 +445,7 @@ zfs_write(znode_t *zp, zfs_uio_t *uio, int ioflag, cred_t *cr)
 	 */
 	offset_t woff = ioflag & O_APPEND ? zp->z_size : zfs_uio_offset(uio);
 	if (woff < 0) {
-		ZFS_EXIT(zfsvfs);
+		zfs_exit(zfsvfs, FTAG);
 		return (SET_ERROR(EINVAL));
 	}
 
@@ -400,7 +457,7 @@ zfs_write(znode_t *zp, zfs_uio_t *uio, int ioflag, cred_t *cr)
 	 * Skip this if uio contains loaned arc_buf.
 	 */
 	if (zfs_uio_prefaultpages(MIN(n, max_blksz), uio)) {
-		ZFS_EXIT(zfsvfs);
+		zfs_exit(zfsvfs, FTAG);
 		return (SET_ERROR(EFAULT));
 	}
 
@@ -435,7 +492,7 @@ zfs_write(znode_t *zp, zfs_uio_t *uio, int ioflag, cred_t *cr)
 
 	if (zn_rlimit_fsize(zp, uio)) {
 		zfs_rangelock_exit(lr);
-		ZFS_EXIT(zfsvfs);
+		zfs_exit(zfsvfs, FTAG);
 		return (SET_ERROR(EFBIG));
 	}
 
@@ -443,7 +500,7 @@ zfs_write(znode_t *zp, zfs_uio_t *uio, int ioflag, cred_t *cr)
 
 	if (woff >= limit) {
 		zfs_rangelock_exit(lr);
-		ZFS_EXIT(zfsvfs);
+		zfs_exit(zfsvfs, FTAG);
 		return (SET_ERROR(EFBIG));
 	}
 
@@ -519,6 +576,11 @@ zfs_write(znode_t *zp, zfs_uio_t *uio, int ioflag, cred_t *cr)
 		}
 
 		/*
+		 * NB: We must call zfs_clear_setid_bits_if_necessary before
+		 * committing the transaction!
+		 */
+
+		/*
 		 * If rangelock_enter() over-locked we grow the blocksize
 		 * and then reduce the lock range.  This will only happen
 		 * on the first iteration since rangelock_reduce() will
@@ -559,6 +621,8 @@ zfs_write(znode_t *zp, zfs_uio_t *uio, int ioflag, cred_t *cr)
 			zfs_uio_fault_disable(uio, B_FALSE);
 #ifdef __linux__
 			if (error == EFAULT) {
+				zfs_clear_setid_bits_if_necessary(zfsvfs, zp,
+				    cr, &clear_setid_bits_txg, tx);
 				dmu_tx_commit(tx);
 				/*
 				 * Account for partial writes before
@@ -581,6 +645,8 @@ zfs_write(znode_t *zp, zfs_uio_t *uio, int ioflag, cred_t *cr)
 			 * VFS, which will handle faulting and will retry.
 			 */
 			if (error != 0 && error != EFAULT) {
+				zfs_clear_setid_bits_if_necessary(zfsvfs, zp,
+				    cr, &clear_setid_bits_txg, tx);
 				dmu_tx_commit(tx);
 				break;
 			}
@@ -605,6 +671,13 @@ zfs_write(znode_t *zp, zfs_uio_t *uio, int ioflag, cred_t *cr)
 			error = dmu_assign_arcbuf_by_dbuf(
 			    sa_get_db(zp->z_sa_hdl), woff, abuf, tx);
 			if (error != 0) {
+				/*
+				 * XXX This might not be necessary if
+				 * dmu_assign_arcbuf_by_dbuf is guaranteed
+				 * to be atomic.
+				 */
+				zfs_clear_setid_bits_if_necessary(zfsvfs, zp,
+				    cr, &clear_setid_bits_txg, tx);
 				dmu_return_arcbuf(abuf);
 				dmu_tx_commit(tx);
 				break;
@@ -630,30 +703,8 @@ zfs_write(znode_t *zp, zfs_uio_t *uio, int ioflag, cred_t *cr)
 			break;
 		}
 
-		/*
-		 * Clear Set-UID/Set-GID bits on successful write if not
-		 * privileged and at least one of the execute bits is set.
-		 *
-		 * It would be nice to do this after all writes have
-		 * been done, but that would still expose the ISUID/ISGID
-		 * to another app after the partial write is committed.
-		 *
-		 * Note: we don't call zfs_fuid_map_id() here because
-		 * user 0 is not an ephemeral uid.
-		 */
-		mutex_enter(&zp->z_acl_lock);
-		if ((zp->z_mode & (S_IXUSR | (S_IXUSR >> 3) |
-		    (S_IXUSR >> 6))) != 0 &&
-		    (zp->z_mode & (S_ISUID | S_ISGID)) != 0 &&
-		    secpolicy_vnode_setid_retain(zp, cr,
-		    ((zp->z_mode & S_ISUID) != 0 && uid == 0)) != 0) {
-			uint64_t newmode;
-			zp->z_mode &= ~(S_ISUID | S_ISGID);
-			newmode = zp->z_mode;
-			(void) sa_update(zp->z_sa_hdl, SA_ZPL_MODE(zfsvfs),
-			    (void *)&newmode, sizeof (uint64_t), tx);
-		}
-		mutex_exit(&zp->z_acl_lock);
+		zfs_clear_setid_bits_if_necessary(zfsvfs, zp, cr,
+		    &clear_setid_bits_txg, tx);
 
 		zfs_tstamp_update_setup(zp, CONTENT_MODIFIED, mtime, ctime);
 
@@ -679,8 +730,14 @@ zfs_write(znode_t *zp, zfs_uio_t *uio, int ioflag, cred_t *cr)
 			/* Avoid clobbering EFAULT. */
 			error = error1;
 
+		/*
+		 * NB: During replay, the TX_SETATTR record logged by
+		 * zfs_clear_setid_bits_if_necessary must precede any of
+		 * the TX_WRITE records logged here.
+		 */
 		zfs_log_write(zilog, tx, TX_WRITE, zp, woff, tx_bytes, ioflag,
 		    NULL, NULL);
+
 		dmu_tx_commit(tx);
 
 		if (error != 0)
@@ -706,7 +763,7 @@ zfs_write(znode_t *zp, zfs_uio_t *uio, int ioflag, cred_t *cr)
 	 */
 	if (zfsvfs->z_replay || zfs_uio_resid(uio) == start_resid ||
 	    error == EFAULT) {
-		ZFS_EXIT(zfsvfs);
+		zfs_exit(zfsvfs, FTAG);
 		return (error);
 	}
 
@@ -718,11 +775,10 @@ zfs_write(znode_t *zp, zfs_uio_t *uio, int ioflag, cred_t *cr)
 	dataset_kstats_update_write_kstats(&zfsvfs->z_kstat, nwritten);
 	task_io_account_write(nwritten);
 
-	ZFS_EXIT(zfsvfs);
+	zfs_exit(zfsvfs, FTAG);
 	return (0);
 }
 
-/*ARGSUSED*/
 int
 zfs_getsecattr(znode_t *zp, vsecattr_t *vsecp, int flag, cred_t *cr)
 {
@@ -730,15 +786,14 @@ zfs_getsecattr(znode_t *zp, vsecattr_t *vsecp, int flag, cred_t *cr)
 	int error;
 	boolean_t skipaclchk = (flag & ATTR_NOACLCHECK) ? B_TRUE : B_FALSE;
 
-	ZFS_ENTER(zfsvfs);
-	ZFS_VERIFY_ZP(zp);
+	if ((error = zfs_enter_verify_zp(zfsvfs, zp, FTAG)) != 0)
+		return (error);
 	error = zfs_getacl(zp, vsecp, skipaclchk, cr);
-	ZFS_EXIT(zfsvfs);
+	zfs_exit(zfsvfs, FTAG);
 
 	return (error);
 }
 
-/*ARGSUSED*/
 int
 zfs_setsecattr(znode_t *zp, vsecattr_t *vsecp, int flag, cred_t *cr)
 {
@@ -747,15 +802,15 @@ zfs_setsecattr(znode_t *zp, vsecattr_t *vsecp, int flag, cred_t *cr)
 	boolean_t skipaclchk = (flag & ATTR_NOACLCHECK) ? B_TRUE : B_FALSE;
 	zilog_t	*zilog = zfsvfs->z_log;
 
-	ZFS_ENTER(zfsvfs);
-	ZFS_VERIFY_ZP(zp);
+	if ((error = zfs_enter_verify_zp(zfsvfs, zp, FTAG)) != 0)
+		return (error);
 
 	error = zfs_setacl(zp, vsecp, skipaclchk, cr);
 
 	if (zfsvfs->z_os->os_sync == ZFS_SYNC_ALWAYS)
 		zil_commit(zilog, 0);
 
-	ZFS_EXIT(zfsvfs);
+	zfs_exit(zfsvfs, FTAG);
 	return (error);
 }
 
@@ -908,10 +963,10 @@ zfs_get_data(void *arg, uint64_t gen, lr_write_t *lr, char *buf,
 }
 
 
-/* ARGSUSED */
 static void
 zfs_get_done(zgd_t *zgd, int error)
 {
+	(void) error;
 	znode_t *zp = zgd->zgd_private;
 
 	if (zgd->zgd_db)

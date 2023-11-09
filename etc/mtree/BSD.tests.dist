@@ -253,6 +253,8 @@
                 amd64
                     arrays
                     ..
+                    kinst
+                    ..
                 ..
             ..
             zfsd
@@ -404,6 +406,8 @@
         ..
         libsbuf
         ..
+        libsysdecode
+        ..
         libthr
             dlopen
             ..
@@ -419,8 +423,12 @@
         atf
             atf-check
             ..
+            atf-pytest-wrapper
+            ..
             atf-sh
             ..
+        ..
+        rc
         ..
         rtld-elf
         ..
@@ -801,6 +809,10 @@
         mqueue
         ..
         net
+            if_ovpn
+            ..
+            routing
+            ..
         ..
         netgraph
         ..
@@ -875,12 +887,14 @@
         apply
         ..
         awk
-	    bugs-fixed
-	    ..
-	    netbsd
-	    ..
+            bugs-fixed
+            ..
+            netbsd
+            ..
         ..
         basename
+        ..
+        bintrans
         ..
         bmake
             archives
@@ -1046,6 +1060,8 @@
         ..
         mkimg
         ..
+        mktemp
+        ..
         ncal
         ..
         opensm
@@ -1057,6 +1073,8 @@
         printf
         ..
         procstat
+        ..
+        renice
         ..
         rs
         ..
@@ -1072,6 +1090,8 @@
         ..
         sort
         ..
+        split
+        ..
         stat
         ..
         tail
@@ -1085,10 +1105,6 @@
         truncate
         ..
         units
-        ..
-        uudecode
-        ..
-        uuencode
         ..
         unifdef
         ..

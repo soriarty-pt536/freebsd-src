@@ -6,7 +6,7 @@
  * You may not use this file except in compliance with the License.
  *
  * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
- * or http://www.opensolaris.org/os/licensing.
+ * or https://opensource.org/licenses/CDDL-1.0.
  * See the License for the specific language governing permissions
  * and limitations under the License.
  *
@@ -47,7 +47,9 @@
  * using our derived config, and record the results.
  */
 
+#ifdef HAVE_AIO_H
 #include <aio.h>
+#endif
 #include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
@@ -982,6 +984,9 @@ zpool_read_label_slow(int fd, nvlist_t **config, int *num_labels)
 int
 zpool_read_label(int fd, nvlist_t **config, int *num_labels)
 {
+#ifndef HAVE_AIO_H
+	return (zpool_read_label_slow(fd, config, num_labels));
+#else
 	struct stat64 statbuf;
 	struct aiocb aiocbs[VDEV_LABELS];
 	struct aiocb *aiocbps[VDEV_LABELS];
@@ -1032,11 +1037,11 @@ zpool_read_label(int fd, nvlist_t **config, int *num_labels)
 					// This shouldn't be possible to
 					// encounter, die if we do.
 					ASSERT(B_FALSE);
-					fallthrough;
+					zfs_fallthrough;
 				case EOPNOTSUPP:
 				case ENOSYS:
 					do_slow = B_TRUE;
-					fallthrough;
+					zfs_fallthrough;
 				case 0:
 				default:
 					(void) aio_return(&aiocbs[l]);
@@ -1104,6 +1109,7 @@ zpool_read_label(int fd, nvlist_t **config, int *num_labels)
 	*config = expected_config;
 
 	return (0);
+#endif
 }
 
 /*
@@ -1537,7 +1543,7 @@ discover_cached_paths(libpc_handle_t *hdl, nvlist_t *nv,
 	 */
 	if (nvlist_lookup_string(nv, ZPOOL_CONFIG_PATH, &path) == 0) {
 		if ((dl = zfs_dirnamelen(path)) == -1)
-			path = ".";
+			path = (char *)".";
 		else
 			path[dl] = '\0';
 		return (zpool_find_import_scan_dir(hdl, lock, cache,
@@ -1688,6 +1694,8 @@ zpool_find_import_cached(libpc_handle_t *hdl, importargs_t *iarg)
 			 * caller.
 			 */
 			nvpair_t *pair = nvlist_next_nvpair(nv, NULL);
+			if (pair == NULL)
+				continue;
 			fnvlist_add_nvlist(pools, nvpair_name(pair),
 			    fnvpair_value_nvlist(pair));
 
@@ -1769,8 +1777,7 @@ zpool_find_import(libpc_handle_t *hdl, importargs_t *iarg)
 
 
 nvlist_t *
-zpool_search_import(void *hdl, importargs_t *import,
-    const pool_config_ops_t *pco)
+zpool_search_import(void *hdl, importargs_t *import, pool_config_ops_t *pco)
 {
 	libpc_handle_t handle = { 0 };
 	nvlist_t *pools = NULL;
@@ -1813,7 +1820,7 @@ pool_match(nvlist_t *cfg, char *tgt)
 
 int
 zpool_find_config(void *hdl, const char *target, nvlist_t **configp,
-    importargs_t *args, const pool_config_ops_t *pco)
+    importargs_t *args, pool_config_ops_t *pco)
 {
 	nvlist_t *pools;
 	nvlist_t *match = NULL;

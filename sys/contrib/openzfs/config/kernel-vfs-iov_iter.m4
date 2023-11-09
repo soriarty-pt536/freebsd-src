@@ -41,6 +41,17 @@ AC_DEFUN([ZFS_AC_KERNEL_SRC_VFS_IOV_ITER], [
 		error = iov_iter_fault_in_readable(&iter, size);
 	])
 
+	ZFS_LINUX_TEST_SRC([fault_in_iov_iter_readable], [
+		#include <linux/fs.h>
+		#include <linux/uio.h>
+	],[
+		struct iov_iter iter = { 0 };
+		size_t size = 512;
+		int error __attribute__ ((unused));
+
+		error = fault_in_iov_iter_readable(&iter, size);
+	])
+
 	ZFS_LINUX_TEST_SRC([iov_iter_count], [
 		#include <linux/fs.h>
 		#include <linux/uio.h>
@@ -124,7 +135,16 @@ AC_DEFUN([ZFS_AC_KERNEL_VFS_IOV_ITER], [
 		    [iov_iter_fault_in_readable() is available])
 	],[
 		AC_MSG_RESULT(no)
-		enable_vfs_iov_iter="no"
+
+		AC_MSG_CHECKING([whether fault_in_iov_iter_readable() is available])
+		ZFS_LINUX_TEST_RESULT([fault_in_iov_iter_readable], [
+			AC_MSG_RESULT(yes)
+			AC_DEFINE(HAVE_FAULT_IN_IOV_ITER_READABLE, 1,
+			    [fault_in_iov_iter_readable() is available])
+		],[
+			AC_MSG_RESULT(no)
+			enable_vfs_iov_iter="no"
+		])
 	])
 
 	AC_MSG_CHECKING([whether iov_iter_count() is available])

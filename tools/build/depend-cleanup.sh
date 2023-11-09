@@ -85,3 +85,16 @@ if [ -e "$OBJTOP"/lib/libc++/libc++.ld ] && \
 	echo "Removing old libc++ linker script"
 	rm -f "$OBJTOP"/lib/libc++/libc++.ld
 fi
+
+# 20220326  fbc002cb72d2    move from bcmp.c to bcmp.S
+if [ "$MACHINE_ARCH" = "amd64" ]; then
+    clean_dep lib/libc bcmp c
+fi
+
+# 20220524  68fe988a40ca    kqueue_test binary replaced shell script
+if stat "$OBJTOP"/tests/sys/kqueue/libkqueue/*kqtest* \
+    "$OBJTOP"/tests/sys/kqueue/libkqueue/.depend.kqtest* >/dev/null 2>&1; then
+	echo "Removing old kqtest"
+	rm -f "$OBJTOP"/tests/sys/kqueue/libkqueue/.depend.* \
+	   "$OBJTOP"/tests/sys/kqueue/libkqueue/*
+fi

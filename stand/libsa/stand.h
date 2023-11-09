@@ -117,7 +117,7 @@ struct fs_ops {
 };
 
 /*
- * libstand-supplied filesystems
+ * libsa-supplied filesystems
  */
 extern struct fs_ops ufs_fsops;
 extern struct fs_ops tftp_fsops;
@@ -139,9 +139,12 @@ extern struct fs_ops efihttp_fsops;
 /* 
  * Device switch
  */
+#define DEV_NAMLEN	8		/* Length of name of device class */
+#define DEV_DEVLEN	128		/* Length of longest device instance name */
+struct devdesc;
 struct devsw {
-    const char	dv_name[8];
-    int		dv_type;		/* opaque type constant, arch-dependant */
+    const char	dv_name[DEV_NAMLEN];
+    int		dv_type;		/* opaque type constant */
 #define DEVT_NONE	0
 #define DEVT_DISK	1
 #define DEVT_NET	2
@@ -156,25 +159,33 @@ struct devsw {
     int		(*dv_ioctl)(struct open_file *f, u_long cmd, void *data);
     int		(*dv_print)(int verbose);	/* print device information */
     void	(*dv_cleanup)(void);
+    char *	(*dv_fmtdev)(struct devdesc *);
 };
 
 /*
- * libstand-supplied device switch
+ * libsa-supplied device switch
  */
 extern struct devsw netdev;
 
 extern int errno;
 
 /*
- * Generic device specifier; architecture-dependent
- * versions may be larger, but should be allowed to
- * overlap.
+ * Generic device specifier; architecture-dependent versions may be larger, but
+ * should be allowed to overlap. The larger device specifiers store more data
+ * than can fit in the generic one that's gleaned after parsing the device
+ * string, or used in some cases to indicate wildcards that match a variety of
+ * situations based on what's on the drive itself rather than what the progammer
+ * might know in advance. Information about open files is stored in d_opendata,
+ * though what's passed into the open routine may differ from what's present
+ * after the open on some configurations.
  */
 struct devdesc {
     struct devsw	*d_dev;
     int			d_unit;
     void		*d_opendata;
 };
+
+char *devformat(struct devdesc *d);
 
 struct open_file {
     int			f_flags;	/* see F_* below */

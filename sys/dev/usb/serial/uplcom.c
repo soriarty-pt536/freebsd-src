@@ -337,15 +337,13 @@ static device_method_t uplcom_methods[] = {
 	DEVMETHOD_END
 };
 
-static devclass_t uplcom_devclass;
-
 static driver_t uplcom_driver = {
 	.name = "uplcom",
 	.methods = uplcom_methods,
 	.size = sizeof(struct uplcom_softc),
 };
 
-DRIVER_MODULE(uplcom, uhub, uplcom_driver, uplcom_devclass, NULL, 0);
+DRIVER_MODULE(uplcom, uhub, uplcom_driver, NULL, NULL);
 MODULE_DEPEND(uplcom, ucom, 1, 1, 1);
 MODULE_DEPEND(uplcom, usb, 1, 1, 1);
 MODULE_VERSION(uplcom, UPLCOM_MODVER);
@@ -762,7 +760,7 @@ static const uint32_t uplcom_rates[] = {
 #define	N_UPLCOM_RATES	nitems(uplcom_rates)
 
 static int
-uplcom_baud_supported(unsigned int speed)
+uplcom_baud_supported(unsigned speed)
 {
 	int i;
 	for (i = 0; i < N_UPLCOM_RATES; i++) {
@@ -814,10 +812,10 @@ uplcom_pre_param(struct ucom_softc *ucom, struct termios *t)
 	return (EIO);
 }
 
-static unsigned int
-uplcom_encode_baud_rate_divisor(uint8_t *buf, unsigned int baud)
+static unsigned
+uplcom_encode_baud_rate_divisor(uint8_t *buf, unsigned baud)
 {
-	unsigned int baseline, mantissa, exponent;
+	unsigned baseline, mantissa, exponent;
 
 	/* Determine the baud rate divisor. This algorithm is taken from Linux. */
 	/*

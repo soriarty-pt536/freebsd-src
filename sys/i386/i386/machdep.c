@@ -54,7 +54,6 @@ __FBSDID("$FreeBSD$");
 #include "opt_isa.h"
 #include "opt_kstack_pages.h"
 #include "opt_maxmem.h"
-#include "opt_mp_watchdog.h"
 #include "opt_perfmon.h"
 #include "opt_platform.h"
 
@@ -125,7 +124,6 @@ __FBSDID("$FreeBSD$");
 #include <x86/mca.h>
 #include <machine/md_var.h>
 #include <machine/metadata.h>
-#include <machine/mp_watchdog.h>
 #include <machine/pc/bios.h>
 #include <machine/pcb.h>
 #include <machine/pcb_ext.h>
@@ -178,6 +176,7 @@ int cold = 1;
 
 long Maxmem = 0;
 long realmem = 0;
+int late_console = 1;
 
 #ifdef PAE
 FEATURE(pae, "Physical Address Extensions");
@@ -187,6 +186,8 @@ struct kva_md_info kmi;
 
 static struct trapframe proc0_tf;
 struct pcpu __pcpu[MAXCPU];
+
+static void i386_clock_source_init(void);
 
 struct mtx icu_lock;
 
@@ -198,9 +199,15 @@ extern struct sysentvec elf32_freebsd_sysvec;
 
 /* Default init_ops implementation. */
 struct init_ops init_ops = {
-	.early_clock_source_init =	i8254_init,
+	.early_clock_source_init =	i386_clock_source_init,
 	.early_delay =			i8254_delay,
 };
+
+static void
+i386_clock_source_init(void)
+{
+	i8254_init();
+}
 
 static void
 cpu_startup(dummy)
@@ -635,7 +642,7 @@ extern inthand_t
  * Display the index and function name of any IDT entries that don't use
  * the default 'rsvd' entry point.
  */
-DB_SHOW_COMMAND(idt, db_show_idt)
+DB_SHOW_COMMAND_FLAGS(idt, db_show_idt, DB_CMD_MEMSAFE)
 {
 	struct gate_descriptor *ip;
 	int idx;
@@ -668,7 +675,7 @@ DB_SHOW_COMMAND(idt, db_show_idt)
 }
 
 /* Show privileged registers. */
-DB_SHOW_COMMAND(sysregs, db_show_sysregs)
+DB_SHOW_COMMAND_FLAGS(sysregs, db_show_sysregs, DB_CMD_MEMSAFE)
 {
 	uint64_t idtr, gdtr;
 
@@ -699,7 +706,7 @@ DB_SHOW_COMMAND(sysregs, db_show_sysregs)
 		db_printf("PAT\t0x%016llx\n", rdmsr(MSR_PAT));
 }
 
-DB_SHOW_COMMAND(dbregs, db_show_dbregs)
+DB_SHOW_COMMAND_FLAGS(dbregs, db_show_dbregs, DB_CMD_MEMSAFE)
 {
 
 	db_printf("dr0\t0x%08x\n", rdr0());
@@ -707,7 +714,7 @@ DB_SHOW_COMMAND(dbregs, db_show_dbregs)
 	db_printf("dr2\t0x%08x\n", rdr2());
 	db_printf("dr3\t0x%08x\n", rdr3());
 	db_printf("dr6\t0x%08x\n", rdr6());
-	db_printf("dr7\t0x%08x\n", rdr7());	
+	db_printf("dr7\t0x%08x\n", rdr7());
 }
 
 DB_SHOW_COMMAND(frame, db_show_frame)
@@ -895,7 +902,7 @@ getmemsize(int first)
 	u_long memtest;
 	vm_paddr_t physmap[PHYS_AVAIL_ENTRIES];
 	quad_t dcons_addr, dcons_size, physmem_tunable;
-	int hasbrokenint12, i, res;
+	int hasbrokenint12, i, res __diagused;
 	u_int extmem;
 	struct vm86frame vmf;
 	struct vm86context vmc;
@@ -1388,7 +1395,6 @@ init386(int first)
 	caddr_t kmdp;
 	vm_offset_t addend;
 	size_t ucode_len;
-	int late_console;
 
 	thread0.td_kstack = proc0kstack;
 	thread0.td_kstack_pages = TD0_KSTACK_PAGES;
@@ -1484,13 +1490,14 @@ init386(int first)
 	r_idt.rd_base = (int) idt;
 	lidt(&r_idt);
 
+	finishidentcpu();	/* Final stage of CPU initialization */
+
 	/*
 	 * Initialize the clock before the console so that console
 	 * initialization can use DELAY().
 	 */
 	clock_init();
 
-	finishidentcpu();	/* Final stage of CPU initialization */
 	i386_setidt2();
 	pmap_set_nx();
 	initializecpu();	/* Initialize CPU registers */
@@ -1532,7 +1539,6 @@ init386(int first)
 	 * Default to late console initialization to support these drivers.
 	 * This loses mainly printf()s in getmemsize() and early debugging.
 	 */
-	late_console = 1;
 	TUNABLE_INT_FETCH("debug.late_console", &late_console);
 	if (!late_console) {
 		cninit();

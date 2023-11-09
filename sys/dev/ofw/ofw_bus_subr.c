@@ -104,6 +104,22 @@ ofw_bus_gen_child_pnpinfo(device_t cbdev, device_t child, struct sbuf *sb)
 	return (0);
 };
 
+int
+ofw_bus_gen_get_device_path(device_t cbdev, device_t child, const char *locator,
+			   struct sbuf *sb)
+{
+	int rv;
+
+	if ( strcmp(locator, BUS_LOCATOR_OFW) == 0){
+		rv = bus_generic_get_device_path(cbdev, child, locator, sb);
+		if (rv == 0){
+			sbuf_printf(sb, "/%s",  ofw_bus_get_name(child));
+		}
+		return (rv);
+	}
+	return (bus_generic_get_device_path(cbdev, child, locator, sb));
+};
+
 const char *
 ofw_bus_gen_get_compat(device_t bus, device_t dev)
 {
@@ -482,6 +498,48 @@ ofw_bus_msimap(phandle_t node, uint16_t pci_rid, phandle_t *msi_parent,
 			*msi_parent = map[i + 1];
 		if (msi_rid != NULL)
 			*msi_rid = masked_rid - rid_base + msi_base;
+		err = 0;
+		break;
+	}
+
+	free(map, M_OFWPROP);
+
+	return (err);
+}
+
+int
+ofw_bus_iommu_map(phandle_t node, uint16_t pci_rid, phandle_t *iommu_parent,
+    uint32_t *iommu_rid)
+{
+	pcell_t *map, mask, iommu_base, rid_base, rid_length;
+	ssize_t len;
+	uint32_t masked_rid;
+	int err, i;
+
+	len = OF_getencprop_alloc_multi(node, "iommu-map", sizeof(*map),
+	    (void **)&map);
+	if (len <= 0)
+		return (ENOENT);
+
+	err = ENOENT;
+	mask = 0xffffffff;
+	OF_getencprop(node, "iommu-map-mask", &mask, sizeof(mask));
+
+	masked_rid = pci_rid & mask;
+	for (i = 0; i < len; i += 4) {
+		rid_base = map[i + 0];
+		rid_length = map[i + 3];
+
+		if (masked_rid < rid_base ||
+		    masked_rid >= (rid_base + rid_length))
+			continue;
+
+		iommu_base = map[i + 2];
+
+		if (iommu_parent != NULL)
+			*iommu_parent = map[i + 1];
+		if (iommu_rid != NULL)
+			*iommu_rid = masked_rid - rid_base + iommu_base;
 		err = 0;
 		break;
 	}

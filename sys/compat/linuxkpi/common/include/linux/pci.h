@@ -4,7 +4,7 @@
  * Copyright (c) 2010 Panasas, Inc.
  * Copyright (c) 2013-2016 Mellanox Technologies, Ltd.
  * All rights reserved.
- * Copyright (c) 2020-2021 The FreeBSD Foundation
+ * Copyright (c) 2020-2022 The FreeBSD Foundation
  *
  * Portions of this software were developed by Björn Zeeb
  * under sponsorship from the FreeBSD Foundation.
@@ -41,10 +41,10 @@
 
 #include <sys/param.h>
 #include <sys/bus.h>
+#include <sys/module.h>
 #include <sys/nv.h>
 #include <sys/pciio.h>
 #include <sys/rman.h>
-#include <sys/bus.h>
 #include <dev/pci/pcivar.h>
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pci_private.h>
@@ -59,6 +59,7 @@
 #include <asm/atomic.h>
 #include <linux/device.h>
 #include <linux/pci_ids.h>
+#include <linux/pm.h>
 
 struct pci_device_id {
 	uint32_t	vendor;
@@ -70,7 +71,24 @@ struct pci_device_id {
 	uintptr_t	driver_data;
 };
 
-#define	MODULE_DEVICE_TABLE(bus, table)
+/* Linux has an empty element at the end of the ID table -> nitems() - 1. */
+#define	MODULE_DEVICE_TABLE(_bus, _table)				\
+									\
+static device_method_t _ ## _bus ## _ ## _table ## _methods[] = {	\
+	DEVMETHOD_END							\
+};									\
+									\
+static driver_t _ ## _bus ## _ ## _table ## _driver = {			\
+	"lkpi_" #_bus #_table,						\
+	_ ## _bus ## _ ## _table ## _methods,				\
+	0								\
+};									\
+									\
+DRIVER_MODULE(lkpi_ ## _table, pci, _ ## _bus ## _ ## _table ## _driver,\
+	0, 0);								\
+									\
+MODULE_PNP_INFO("U32:vendor;U32:device;V32:subvendor;V32:subdevice",	\
+    _bus, lkpi_ ## _table, _table, nitems(_table) - 1)
 
 #define	PCI_ANY_ID			-1U
 
@@ -88,7 +106,8 @@ struct pci_device_id {
 
 #define	to_pci_dev(n)	container_of(n, struct pci_dev, dev)
 
-#define	PCI_VENDOR_ID		PCIR_DEVVENDOR
+#define	PCI_VENDOR_ID		PCIR_VENDOR
+#define	PCI_DEVICE_ID		PCIR_DEVICE
 #define	PCI_COMMAND		PCIR_COMMAND
 #define	PCI_COMMAND_INTX_DISABLE	PCIM_CMD_INTxDIS
 #define	PCI_EXP_DEVCTL		PCIER_DEVICE_CTL		/* Device Control */
@@ -112,6 +131,7 @@ struct pci_device_id {
 #define	PCI_EXP_DEVCAP2		PCIER_DEVICE_CAP2		/* Device Capabilities 2 */
 #define	PCI_EXP_DEVCTL2		PCIER_DEVICE_CTL2		/* Device Control 2 */
 #define	PCI_EXP_DEVCTL2_LTR_EN	PCIEM_CTL2_LTR_ENABLE
+#define	PCI_EXP_DEVCTL2_COMP_TMOUT_DIS	PCIEM_CTL2_COMP_TIMO_DISABLE
 #define	PCI_EXP_LNKCAP2		PCIER_LINK_CAP2			/* Link Capabilities 2 */
 #define	PCI_EXP_LNKCTL2		PCIER_LINK_CTL2			/* Link Control 2 */
 #define	PCI_EXP_LNKSTA2		PCIER_LINK_STA2			/* Link Status 2 */
@@ -182,6 +202,8 @@ typedef int pci_power_t;
 
 #define PCI_POWER_ERROR	PCI_POWERSTATE_UNKNOWN
 
+extern const char *pci_power_names[6];
+
 #define	PCI_ERR_ROOT_COMMAND		PCIR_AER_ROOTERR_CMD
 #define	PCI_ERR_ROOT_ERR_SRC		PCIR_AER_COR_SOURCE_ID
 
@@ -194,6 +216,7 @@ typedef int pci_power_t;
 #define	PCI_IRQ_LEGACY			0x01
 #define	PCI_IRQ_MSI			0x02
 #define	PCI_IRQ_MSIX			0x04
+#define	PCI_IRQ_ALL_TYPES		(PCI_IRQ_MSIX|PCI_IRQ_MSI|PCI_IRQ_LEGACY)
 
 struct pci_dev;
 
@@ -211,6 +234,7 @@ struct pci_driver {
 	struct device_driver		driver;
 	const struct pci_error_handlers       *err_handler;
 	bool				isdrm;
+	int				bsd_probe_return;
 	int  (*bsd_iov_init)(device_t dev, uint16_t num_vfs,
 	    const nvlist_t *pf_config);
 	void  (*bsd_iov_uninit)(device_t dev);
@@ -266,6 +290,7 @@ struct pci_dev {
 	struct pci_driver	*pdrv;
 	struct pci_bus		*bus;
 	struct pci_dev		*root;
+	pci_power_t		current_state;
 	uint16_t		device;
 	uint16_t		vendor;
 	uint16_t		subsystem_vendor;
@@ -296,10 +321,24 @@ struct pcim_iomap_devres {
 	struct resource	*res_table[PCIR_MAX_BAR_0 + 1];
 };
 
+int pci_request_region(struct pci_dev *pdev, int bar, const char *res_name);
+int pci_alloc_irq_vectors(struct pci_dev *pdev, int minv, int maxv,
+    unsigned int flags);
+
 /* Internal helper function(s). */
 struct pci_dev *lkpinew_pci_dev(device_t);
+struct pci_devres *lkpi_pci_devres_get_alloc(struct pci_dev *pdev);
 void lkpi_pci_devres_release(struct device *, void *);
+struct resource *_lkpi_pci_iomap(struct pci_dev *pdev, int bar, int mmio_size);
+struct pcim_iomap_devres *lkpi_pcim_iomap_devres_find(struct pci_dev *pdev);
 void lkpi_pcim_iomap_table_release(struct device *, void *);
+
+static inline bool
+dev_is_pci(struct device *dev)
+{
+
+	return (device_get_devclass(dev->bsddev) == devclass_find("pci"));
+}
 
 static inline int
 pci_resource_type(struct pci_dev *pdev, int bar)
@@ -458,21 +497,48 @@ pci_clear_master(struct pci_dev *pdev)
 	return (0);
 }
 
-static inline struct pci_devres *
-lkpi_pci_devres_get_alloc(struct pci_dev *pdev)
+static inline bool
+pci_is_root_bus(struct pci_bus *pbus)
 {
-	struct pci_devres *dr;
 
-	dr = lkpi_devres_find(&pdev->dev, lkpi_pci_devres_release, NULL, NULL);
-	if (dr == NULL) {
-		dr = lkpi_devres_alloc(lkpi_pci_devres_release, sizeof(*dr),
-		    GFP_KERNEL | __GFP_ZERO);
-		if (dr != NULL)
-			lkpi_devres_add(&pdev->dev, dr);
-	}
-
-	return (dr);
+	return (pbus->self == NULL);
 }
+
+static inline struct pci_dev *
+pci_upstream_bridge(struct pci_dev *pdev)
+{
+
+	if (pci_is_root_bus(pdev->bus))
+		return (NULL);
+
+	/*
+	 * If we do not have a (proper) "upstream bridge" set, e.g., we point
+	 * to ourselves, try to handle this case on the fly like we do
+	 * for pcie_find_root_port().
+	 */
+	if (pdev == pdev->bus->self) {
+		device_t bridge;
+
+		bridge = device_get_parent(pdev->dev.bsddev);
+		if (bridge == NULL)
+			goto done;
+		bridge = device_get_parent(bridge);
+		if (bridge == NULL)
+			goto done;
+		if (device_get_devclass(device_get_parent(bridge)) !=
+		    devclass_find("pci"))
+			goto done;
+
+		/*
+		 * "bridge" is a PCI-to-PCI bridge.  Create a Linux pci_dev
+		 * for it so it can be returned.
+		 */
+		pdev->bus->self = lkpinew_pci_dev(bridge);
+	}
+done:
+	return (pdev->bus->self);
+}
+
 static inline struct pci_devres *
 lkpi_pci_devres_find(struct pci_dev *pdev)
 {
@@ -481,50 +547,6 @@ lkpi_pci_devres_find(struct pci_dev *pdev)
 		return (NULL);
 
 	return (lkpi_pci_devres_get_alloc(pdev));
-}
-
-static inline int
-pci_request_region(struct pci_dev *pdev, int bar, const char *res_name)
-{
-	struct resource *res;
-	struct pci_devres *dr;
-	struct pci_mmio_region *mmio;
-	int rid;
-	int type;
-
-	type = pci_resource_type(pdev, bar);
-	if (type < 0)
-		return (-ENODEV);
-	rid = PCIR_BAR(bar);
-	res = bus_alloc_resource_any(pdev->dev.bsddev, type, &rid,
-	    RF_ACTIVE|RF_SHAREABLE);
-	if (res == NULL) {
-		device_printf(pdev->dev.bsddev, "%s: failed to alloc "
-		    "bar %d type %d rid %d\n",
-		    __func__, bar, type, PCIR_BAR(bar));
-		return (-ENODEV);
-	}
-
-	/*
-	 * It seems there is an implicit devres tracking on these if the device
-	 * is managed; otherwise the resources are not automatiaclly freed on
-	 * FreeBSD/LinuxKPI tough they should be/are expected to be by Linux
-	 * drivers.
-	 */
-	dr = lkpi_pci_devres_find(pdev);
-	if (dr != NULL) {
-		dr->region_mask |= (1 << bar);
-		dr->region_table[bar] = res;
-	}
-
-	/* Even if the device is not managed we need to track it for iomap. */
-	mmio = malloc(sizeof(*mmio), M_DEVBUF, M_WAITOK | M_ZERO);
-	mmio->rid = PCIR_BAR(bar);
-	mmio->type = type;
-	mmio->res = res;
-	TAILQ_INSERT_TAIL(&pdev->mmio, mmio, next);
-
-	return (0);
 }
 
 static inline void
@@ -854,42 +876,6 @@ pci_enable_msi(struct pci_dev *pdev)
 }
 
 static inline int
-pci_alloc_irq_vectors(struct pci_dev *pdev, int minv, int maxv,
-    unsigned int flags)
-{
-	int error;
-
-	if (flags & PCI_IRQ_MSIX) {
-		struct msix_entry *entries;
-		int i;
-
-		entries = kcalloc(maxv, sizeof(*entries), GFP_KERNEL);
-		if (entries == NULL) {
-			error = -ENOMEM;
-			goto out;
-		}
-		for (i = 0; i < maxv; ++i)
-			entries[i].entry = i;
-		error = pci_enable_msix(pdev, entries, maxv);
-out:
-		kfree(entries);
-		if (error == 0 && pdev->msix_enabled)
-			return (pdev->dev.irq_end - pdev->dev.irq_start);
-	}
-	if (flags & PCI_IRQ_MSI) {
-		error = pci_enable_msi(pdev);
-		if (error == 0 && pdev->msi_enabled)
-			return (pdev->dev.irq_end - pdev->dev.irq_start);
-	}
-	if (flags & PCI_IRQ_LEGACY) {
-		if (pdev->irq)
-			return (1);
-	}
-
-	return (-EINVAL);
-}
-
-static inline int
 pci_channel_offline(struct pci_dev *pdev)
 {
 
@@ -900,48 +886,9 @@ static inline int pci_enable_sriov(struct pci_dev *dev, int nr_virtfn)
 {
 	return -ENODEV;
 }
+
 static inline void pci_disable_sriov(struct pci_dev *dev)
 {
-}
-
-static inline struct resource *
-_lkpi_pci_iomap(struct pci_dev *pdev, int bar, int mmio_size __unused)
-{
-	struct pci_mmio_region *mmio, *p;
-	int type;
-
-	type = pci_resource_type(pdev, bar);
-	if (type < 0) {
-		device_printf(pdev->dev.bsddev, "%s: bar %d type %d\n",
-		     __func__, bar, type);
-		return (NULL);
-	}
-
-	/*
-	 * Check for duplicate mappings.
-	 * This can happen if a driver calls pci_request_region() first.
-	 */
-	TAILQ_FOREACH_SAFE(mmio, &pdev->mmio, next, p) {
-		if (mmio->type == type && mmio->rid == PCIR_BAR(bar)) {
-			return (mmio->res);
-		}
-	}
-
-	mmio = malloc(sizeof(*mmio), M_DEVBUF, M_WAITOK | M_ZERO);
-	mmio->rid = PCIR_BAR(bar);
-	mmio->type = type;
-	mmio->res = bus_alloc_resource_any(pdev->dev.bsddev, mmio->type,
-	    &mmio->rid, RF_ACTIVE|RF_SHAREABLE);
-	if (mmio->res == NULL) {
-		device_printf(pdev->dev.bsddev, "%s: failed to alloc "
-		    "bar %d type %d rid %d\n",
-		    __func__, bar, type, PCIR_BAR(bar));
-		free(mmio, M_DEVBUF);
-		return (NULL);
-	}
-	TAILQ_INSERT_TAIL(&pdev->mmio, mmio, next);
-
-	return (mmio->res);
 }
 
 static inline void *
@@ -1208,6 +1155,38 @@ pcie_capability_write_word(struct pci_dev *dev, int pos, u16 val)
 	return pci_write_config_word(dev, pci_pcie_cap(dev) + pos, val);
 }
 
+static inline int
+pcie_capability_set_word(struct pci_dev *dev, int pos, uint16_t val)
+{
+	int error;
+	uint16_t v;
+
+	error = pcie_capability_read_word(dev, pos, &v);
+	if (error != 0)
+		return (error);
+
+	v |= val;
+
+	error = pcie_capability_write_word(dev, pos, v);
+	return (error);
+}
+
+static inline int
+pcie_capability_clear_word(struct pci_dev *dev, int pos, uint16_t val)
+{
+	int error;
+	uint16_t v;
+
+	error = pcie_capability_read_word(dev, pos, &v);
+	if (error != 0)
+		return (error);
+
+	v &= ~val;
+
+	error = pcie_capability_write_word(dev, pos, v);
+	return (error);
+}
+
 static inline int pcie_get_minimum_link(struct pci_dev *dev,
     enum pci_bus_speed *speed, enum pcie_link_width *width)
 {
@@ -1379,13 +1358,6 @@ pci_dev_present(const struct pci_device_id *cur)
 	return (0);
 }
 
-static inline bool
-pci_is_root_bus(struct pci_bus *pbus)
-{
-
-	return (pbus->self == NULL);
-}
-
 struct pci_dev *lkpi_pci_get_domain_bus_and_slot(int domain,
     unsigned int bus, unsigned int devfn);
 #define	pci_get_domain_bus_and_slot(domain, bus, devfn)	\
@@ -1482,26 +1454,6 @@ pcim_enable_device(struct pci_dev *pdev)
 	return (error);
 }
 
-static inline struct pcim_iomap_devres *
-lkpi_pcim_iomap_devres_find(struct pci_dev *pdev)
-{
-	struct pcim_iomap_devres *dr;
-
-	dr = lkpi_devres_find(&pdev->dev, lkpi_pcim_iomap_table_release,
-	    NULL, NULL);
-	if (dr == NULL) {
-		dr = lkpi_devres_alloc(lkpi_pcim_iomap_table_release,
-		    sizeof(*dr), GFP_KERNEL | __GFP_ZERO);
-		if (dr != NULL)
-			lkpi_devres_add(&pdev->dev, dr);
-	}
-
-	if (dr == NULL)
-		device_printf(pdev->dev.bsddev, "%s: NULL\n", __func__);
-
-	return (dr);
-}
-
 static inline void __iomem **
 pcim_iomap_table(struct pci_dev *pdev)
 {
@@ -1523,27 +1475,16 @@ pcim_iomap_table(struct pci_dev *pdev)
 }
 
 static inline int
-pcim_iomap_regions_request_all(struct pci_dev *pdev, uint32_t mask, char *name)
+pcim_iomap_regions(struct pci_dev *pdev, uint32_t mask, const char *name)
 {
 	struct pcim_iomap_devres *dr;
 	void *res;
-	uint32_t mappings, requests, req_mask;
-	int bar, error;
+	uint32_t mappings;
+	int bar;
 
 	dr = lkpi_pcim_iomap_devres_find(pdev);
 	if (dr == NULL)
 		return (-ENOMEM);
-
-	/* Request all the BARs ("regions") we do not iomap. */
-	req_mask = ((1 << (PCIR_MAX_BAR_0 + 1)) - 1) & ~mask;
-	for (bar = requests = 0; requests != req_mask; bar++) {
-		if ((req_mask & (1 << bar)) == 0)
-			continue;
-		error = pci_request_region(pdev, bar, name);
-		if (error != 0 && error != -ENODEV)
-			goto err;
-		requests |= (1 << bar);
-	}
 
 	/* Now iomap all the requested (by "mask") ones. */
 	for (bar = mappings = 0; mappings != mask; bar++) {
@@ -1567,7 +1508,6 @@ pcim_iomap_regions_request_all(struct pci_dev *pdev, uint32_t mask, char *name)
 	}
 
 	return (0);
-
 err:
 	for (bar = PCIR_MAX_BAR_0; bar >= 0; bar--) {
 		if ((mappings & (1 << bar)) != 0) {
@@ -1575,9 +1515,39 @@ err:
 			if (res == NULL)
 				continue;
 			pci_iounmap(pdev, res);
-		} else if ((requests & (1 << bar)) != 0) {
-			pci_release_region(pdev, bar);
 		}
+	}
+
+	return (-EINVAL);
+}
+
+static inline int
+pcim_iomap_regions_request_all(struct pci_dev *pdev, uint32_t mask, char *name)
+{
+	uint32_t requests, req_mask;
+	int bar, error;
+
+	/* Request all the BARs ("regions") we do not iomap. */
+	req_mask = ((1 << (PCIR_MAX_BAR_0 + 1)) - 1) & ~mask;
+	for (bar = requests = 0; requests != req_mask; bar++) {
+		if ((req_mask & (1 << bar)) == 0)
+			continue;
+		error = pci_request_region(pdev, bar, name);
+		if (error != 0 && error != -ENODEV)
+			goto err;
+		requests |= (1 << bar);
+	}
+
+	error = pcim_iomap_regions(pdev, mask, name);
+	if (error != 0)
+		goto err;
+
+	return (0);
+
+err:
+	for (bar = PCIR_MAX_BAR_0; bar >= 0; bar--) {
+		if ((requests & (1 << bar)) != 0)
+			pci_release_region(pdev, bar);
 	}
 
 	return (-EINVAL);
@@ -1588,6 +1558,47 @@ static inline void
 linuxkpi_pcim_want_to_use_bus_functions(struct pci_dev *pdev)
 {
 	pdev->want_iomap_res = true;
+}
+
+static inline bool
+pci_is_thunderbolt_attached(struct pci_dev *pdev)
+{
+
+	return (false);
+}
+
+static inline void *
+pci_platform_rom(struct pci_dev *pdev, size_t *size)
+{
+
+	return (NULL);
+}
+
+static inline void
+pci_ignore_hotplug(struct pci_dev *pdev)
+{
+}
+
+static inline const char *
+pci_power_name(pci_power_t state)
+{
+	int pstate = state + 1;
+
+	if (pstate >= 0 && pstate < nitems(pci_power_names))
+		return (pci_power_names[pstate]);
+	else
+		return (pci_power_names[0]);
+}
+
+static inline int
+pcie_get_readrq(struct pci_dev *dev)
+{
+	u16 ctl;
+
+	if (pcie_capability_read_word(dev, PCI_EXP_DEVCTL, &ctl))
+		return (-EINVAL);
+
+	return (128 << ((ctl & PCI_EXP_DEVCTL_READRQ) >> 12));
 }
 
 #endif	/* _LINUXKPI_LINUX_PCI_H_ */

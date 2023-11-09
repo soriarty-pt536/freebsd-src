@@ -622,7 +622,7 @@ zcp_dataset_hold_error(lua_State *state, dsl_pool_t *dp, const char *dsname,
  */
 dsl_dataset_t *
 zcp_dataset_hold(lua_State *state, dsl_pool_t *dp, const char *dsname,
-    void *tag)
+    const void *tag)
 {
 	dsl_dataset_t *ds;
 	int error = dsl_dataset_hold(dp, dsname, tag, &ds);
@@ -1443,10 +1443,8 @@ zcp_parse_args(lua_State *state, const char *fname, const zcp_arg_t *pargs,
 	}
 }
 
-/* BEGIN CSTYLED */
 ZFS_MODULE_PARAM(zfs_lua, zfs_lua_, max_instrlimit, ULONG, ZMOD_RW,
 	"Max instruction limit that can be specified for a channel program");
 
 ZFS_MODULE_PARAM(zfs_lua, zfs_lua_, max_memlimit, ULONG, ZMOD_RW,
 	"Max memory limit that can be specified for a channel program");
-/* END CSTYLED */

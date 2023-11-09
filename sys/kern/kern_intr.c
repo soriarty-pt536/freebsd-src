@@ -89,7 +89,6 @@ struct	intr_entropy {
 };
 
 struct	intr_event *clk_intr_event;
-struct	intr_event *tty_intr_event;
 struct proc *intrproc;
 
 static MALLOC_DEFINE(M_ITHREAD, "ithread", "Interrupt Threads");
@@ -205,7 +204,7 @@ ithread_update(struct intr_thread *ithd)
 	sched_clear_tdname(td);
 #endif
 	thread_lock(td);
-	sched_prio(td, pri);
+	sched_ithread_prio(td, pri);
 	thread_unlock(td);
 }
 
@@ -533,6 +532,9 @@ int
 intr_event_destroy(struct intr_event *ie)
 {
 
+	if (ie == NULL)
+		return (EINVAL);
+
 	mtx_lock(&event_lock);
 	mtx_lock(&ie->ie_lock);
 	if (!CK_SLIST_EMPTY(&ie->ie_handlers)) {
@@ -589,7 +591,7 @@ ithread_destroy(struct intr_thread *ithread)
 	ithread->it_flags |= IT_DEAD;
 	if (TD_AWAITING_INTR(td)) {
 		TD_CLR_IWAIT(td);
-		sched_add(td, SRQ_INTR);
+		sched_wakeup(td, SRQ_INTR);
 	} else
 		thread_unlock(td);
 }
@@ -775,7 +777,7 @@ intr_event_barrier(struct intr_event *ie)
 
 	/*
 	 * Now wait on the inactive phase.
-	 * The acquire fence is needed so that that all post-barrier accesses
+	 * The acquire fence is needed so that all post-barrier accesses
 	 * are after the check.
 	 */
 	while (ie->ie_active[phase] > 0)
@@ -1020,7 +1022,7 @@ intr_event_schedule_thread(struct intr_event *ie, struct trapframe *frame)
 		CTR3(KTR_INTR, "%s: schedule pid %d (%s)", __func__, td->td_proc->p_pid,
 		    td->td_name);
 		TD_CLR_IWAIT(td);
-		sched_add(td, SRQ_INTR);
+		sched_wakeup(td, SRQ_INTR);
 	} else {
 #ifdef HWPMC_HOOKS
 		it->it_waiting++;
@@ -1491,20 +1493,8 @@ db_dump_intrhand(struct intr_handler *ih)
 	case PI_REALTIME:
 		db_printf("CLK ");
 		break;
-	case PI_AV:
-		db_printf("AV  ");
-		break;
-	case PI_TTY:
-		db_printf("TTY ");
-		break;
-	case PI_NET:
-		db_printf("NET ");
-		break;
-	case PI_DISK:
-		db_printf("DISK");
-		break;
-	case PI_DULL:
-		db_printf("DULL");
+	case PI_INTR:
+		db_printf("INTR");
 		break;
 	default:
 		if (ih->ih_pri >= PI_SOFT)
@@ -1611,7 +1601,7 @@ db_dump_intr_event(struct intr_event *ie, int handlers)
 /*
  * Dump data about interrupt handlers
  */
-DB_SHOW_COMMAND(intr, db_show_intr)
+DB_SHOW_COMMAND_FLAGS(intr, db_show_intr, DB_CMD_MEMSAFE)
 {
 	struct intr_event *ie;
 	int all, verbose;
@@ -1695,7 +1685,7 @@ SYSCTL_PROC(_hw, OID_AUTO, intrcnt,
 /*
  * DDB command to dump the interrupt statistics.
  */
-DB_SHOW_COMMAND(intrcnt, db_show_intrcnt)
+DB_SHOW_COMMAND_FLAGS(intrcnt, db_show_intrcnt, DB_CMD_MEMSAFE)
 {
 	u_long *i;
 	char *cp;

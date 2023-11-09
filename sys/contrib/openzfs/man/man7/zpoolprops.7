@@ -6,7 +6,7 @@
 .\" You may not use this file except in compliance with the License.
 .\"
 .\" You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
-.\" or http://www.opensolaris.org/os/licensing.
+.\" or https://opensource.org/licenses/CDDL-1.0.
 .\" See the License for the specific language governing permissions
 .\" and limitations under the License.
 .\"
@@ -101,6 +101,10 @@ Over time
 will decrease while
 .Sy free
 increases.
+.It Sy leaked
+Space not released while
+.Sy freeing
+due to corruption, now permanently leaked into the pool.
 .It Sy health
 The current health of the pool.
 Health can be one of
@@ -173,7 +177,7 @@ changed with the
 .Nm zpool Cm set
 command:
 .Bl -tag -width Ds
-.It Sy ashift Ns = Ns Sy ashift
+.It Sy ashift Ns = Ns Ar ashift
 Pool sector size exponent, to the power of
 .Sy 2
 (internally referred to as
@@ -184,7 +188,7 @@ layer and a ZFS internal exception list.
 I/O operations will be aligned to the specified size boundaries.
 Additionally, the minimum (disk)
 write size will be set to the specified size, so this represents a
-space vs. performance trade-off.
+space/performance trade-off.
 For optimal performance, the pool sector size should be greater than
 or equal to the sector size of the underlying disks.
 The typical case for setting this property is when

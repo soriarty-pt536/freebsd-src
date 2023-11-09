@@ -27,6 +27,7 @@
 #include <sys/cdefs.h>
 __FBSDID("$FreeBSD$");
 
+#include "opt_platform.h"
 #include <sys/param.h>
 #include <sys/conf.h>
 #include <sys/bus.h>
@@ -40,8 +41,11 @@ __FBSDID("$FreeBSD$");
 
 #include <machine/bus.h>
 
+#ifdef FDT
 #include <dev/ofw/ofw_bus.h>
 #include <dev/ofw/ofw_bus_subr.h>
+#endif
+
 #include <dev/extres/clk/clk_fixed.h>
 
 #define	CLK_TYPE_FIXED		1
@@ -274,9 +278,8 @@ static device_method_t clk_fixed_methods[] = {
 
 DEFINE_CLASS_0(clk_fixed, clk_fixed_driver, clk_fixed_methods,
     sizeof(struct clk_fixed_softc));
-static devclass_t clk_fixed_devclass;
-EARLY_DRIVER_MODULE(clk_fixed, simplebus, clk_fixed_driver,
-    clk_fixed_devclass, 0, 0, BUS_PASS_BUS + BUS_PASS_ORDER_MIDDLE);
+EARLY_DRIVER_MODULE(clk_fixed, simplebus, clk_fixed_driver, 0, 0,
+    BUS_PASS_BUS + BUS_PASS_ORDER_MIDDLE);
 MODULE_VERSION(clk_fixed, 1);
 
 #endif

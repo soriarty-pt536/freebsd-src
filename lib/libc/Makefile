@@ -32,7 +32,7 @@ CFLAGS+=-DNO__SCCSID -DNO__RCSID
 LIB=c
 SHLIB_MAJOR= 7
 .if ${MK_SSP} != "no" && \
-    (${LIBC_ARCH} == "i386" || ${MACHINE_ARCH:Mpower*} != "")
+    (${LIBC_ARCH} == "i386" || ${LIBC_ARCH:Mpowerpc*} != "")
 SHLIB_LDSCRIPT=libc.ldscript
 .else
 SHLIB_LDSCRIPT=libc_nossp.ldscript
@@ -57,7 +57,8 @@ CFLAGS+=${CANCELPOINTS_CFLAGS}
 # Use a more efficient TLS model for libc since we can reasonably assume that
 # it will be loaded during program startup.
 .if ${LIBC_ARCH} == "aarch64" || ${LIBC_ARCH} == "amd64" || \
-    ${LIBC_ARCH} == "i386" || ${LIBC_ARCH} == "riscv"
+    ${LIBC_ARCH} == "i386" || ${LIBC_ARCH} == "riscv" || \
+    ${LIBC_ARCH:Mpowerpc*} != ""
 CFLAGS+= -ftls-model=initial-exec
 .endif
 
@@ -68,7 +69,7 @@ LDFLAGS+= -nodefaultlibs
 LIBADD+=	compiler_rt
 
 .if ${MK_SSP} != "no" && \
-    (${LIBC_ARCH} == "i386" || ${MACHINE_ARCH:Mpower*} != "")
+    (${LIBC_ARCH} == "i386" || ${LIBC_ARCH:Mpowerpc*} != "")
 LIBADD+=	ssp_nonshared
 .endif
 
@@ -108,10 +109,7 @@ NOASM=
 .include "${LIBC_SRCTOP}/net/Makefile.inc"
 .include "${LIBC_SRCTOP}/nls/Makefile.inc"
 .include "${LIBC_SRCTOP}/posix1e/Makefile.inc"
-.if ${LIBC_ARCH} != "aarch64" && \
-    ${LIBC_ARCH} != "amd64" && \
-    ${LIBC_ARCH} != "powerpc64" && \
-    ${LIBC_ARCH} != "riscv"
+.if ${MACHINE_ABI:Mlong32}
 .include "${LIBC_SRCTOP}/quad/Makefile.inc"
 .endif
 .include "${LIBC_SRCTOP}/regex/Makefile.inc"
@@ -161,7 +159,7 @@ CFLAGS+= -DSYMBOL_VERSIONING
 
 # If there are no machine dependent sources, append all the
 # machine-independent sources:
-.if empty(MDSRCS)
+.if empty(MDSRCS) || ${MK_MACHDEP_OPTIMIZATIONS} == no
 SRCS+=	${MISRCS}
 .else
 # Append machine-dependent sources, then append machine-independent sources

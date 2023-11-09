@@ -11,8 +11,10 @@ SUBDIR=	alias \
 	banner \
 	basename \
 	beep \
+	bintrans \
 	brandelf \
 	bsdcat \
+	bsddialog \
 	bsdiff \
 	bzip2 \
 	bzip2recover \
@@ -89,7 +91,6 @@ SUBDIR=	alias \
 	m4 \
 	mandoc \
 	mesg \
-	minigzip \
 	ministat \
 	mkdep \
 	mkfifo \
@@ -105,9 +106,6 @@ SUBDIR=	alias \
 	nice \
 	nl \
 	nohup \
-	opieinfo \
-	opiekey \
-	opiepasswd \
 	pagesize \
 	passwd \
 	paste \
@@ -168,13 +166,12 @@ SUBDIR=	alias \
 	unzip \
 	units \
 	unvis \
-	uudecode \
-	uuencode \
 	vis \
 	vmstat \
 	w \
 	wall \
 	wc \
+	wg \
 	what \
 	whereis \
 	which \

@@ -44,6 +44,10 @@
  * $FreeBSD$
  */
 
+#ifdef __i386__
+#include <i386/pmap.h>
+#else /* !__i386__ */
+
 #ifndef _MACHINE_PMAP_H_
 #define	_MACHINE_PMAP_H_
 
@@ -287,6 +291,7 @@
 #include <sys/_lock.h>
 #include <sys/_mutex.h>
 #include <sys/_pctrie.h>
+#include <sys/_pv_entry.h>
 #include <sys/_rangeset.h>
 #include <sys/_smr.h>
 
@@ -349,8 +354,6 @@ extern pt_entry_t pg_nx;
 /*
  * Pmap stuff
  */
-struct	pv_entry;
-struct	pv_chunk;
 
 /*
  * Locks
@@ -420,39 +423,6 @@ extern struct pmap	kernel_pmap_store;
 
 int	pmap_pinit_type(pmap_t pmap, enum pmap_type pm_type, int flags);
 int	pmap_emulate_accessed_dirty(pmap_t pmap, vm_offset_t va, int ftype);
-#endif
-
-/*
- * For each vm_page_t, there is a list of all currently valid virtual
- * mappings of that page.  An entry is a pv_entry_t, the list is pv_list.
- */
-typedef struct pv_entry {
-	vm_offset_t	pv_va;		/* virtual address for mapping */
-	TAILQ_ENTRY(pv_entry)	pv_next;
-} *pv_entry_t;
-
-/*
- * pv_entries are allocated in chunks per-process.  This avoids the
- * need to track per-pmap assignments.
- */
-#define	_NPCM	3
-#define	_NPCPV	168
-#define	PV_CHUNK_HEADER							\
-	pmap_t			pc_pmap;				\
-	TAILQ_ENTRY(pv_chunk)	pc_list;				\
-	uint64_t		pc_map[_NPCM];	/* bitmap; 1 = free */	\
-	TAILQ_ENTRY(pv_chunk)	pc_lru;
-
-struct pv_chunk_header {
-	PV_CHUNK_HEADER
-};
-
-struct pv_chunk {
-	PV_CHUNK_HEADER
-	struct pv_entry		pc_pventry[_NPCPV];
-};
-
-#ifdef	_KERNEL
 
 extern caddr_t	CADDR1;
 extern pt_entry_t *CMAP1;
@@ -503,7 +473,7 @@ void	pmap_page_set_memattr_noflush(vm_page_t m, vm_memattr_t ma);
 void	pmap_pinit_pml4(vm_page_t);
 void	pmap_pinit_pml5(vm_page_t);
 bool	pmap_ps_enabled(pmap_t pmap);
-void	pmap_unmapdev(vm_offset_t, vm_size_t);
+void	pmap_unmapdev(void *, vm_size_t);
 void	pmap_invalidate_page(pmap_t, vm_offset_t);
 void	pmap_invalidate_range(pmap_t, vm_offset_t, vm_offset_t);
 void	pmap_invalidate_all(pmap_t);
@@ -529,6 +499,7 @@ void	pmap_page_array_startup(long count);
 vm_page_t pmap_page_alloc_below_4g(bool zeroed);
 
 #if defined(KASAN) || defined(KMSAN)
+void	pmap_san_bootstrap(void);
 void	pmap_san_enter(vm_offset_t);
 #endif
 
@@ -584,3 +555,5 @@ pmap_pml5e_index(vm_offset_t va)
 #endif /* !LOCORE */
 
 #endif /* !_MACHINE_PMAP_H_ */
+
+#endif /* __i386__ */

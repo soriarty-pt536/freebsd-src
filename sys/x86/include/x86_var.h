@@ -128,13 +128,13 @@ void	restore_wp(bool old_wp);
 void	finishidentcpu(void);
 void	identify_cpu1(void);
 void	identify_cpu2(void);
+void	identify_cpu_ext_features(void);
 void	identify_cpu_fixup_bsp(void);
 void	identify_hypervisor(void);
 void	initializecpu(void);
 void	initializecpucache(void);
 bool	fix_cpuid(void);
 void	fillw(int /*u_short*/ pat, void *base, size_t cnt);
-int	is_physical_memory(vm_paddr_t addr);
 int	isa_nmi(int cd);
 void	handle_ibrs_entry(void);
 void	handle_ibrs_exit(void);
@@ -174,5 +174,11 @@ uint64_t rdtsc_ordered(void);
 #define	MSR_OP_CPUID(id)	((id) << 8)
 
 void x86_msr_op(u_int msr, u_int op, uint64_t arg1, uint64_t *res);
+
+#if defined(__i386__) && defined(INVARIANTS)
+void	trap_check_kstack(void);
+#else
+#define	trap_check_kstack()
+#endif
 
 #endif

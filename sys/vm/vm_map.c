@@ -223,7 +223,7 @@ static void
 kmapent_free(void *item, vm_size_t size, uint8_t pflag)
 {
 	vm_offset_t addr;
-	int error;
+	int error __diagused;
 
 	if ((pflag & UMA_SLAB_PRIV) == 0)
 		/* XXX leaked */
@@ -2824,12 +2824,8 @@ again:
 			continue;
 		}
 
-		if (obj->type != OBJT_DEFAULT &&
-		    (obj->flags & OBJ_SWAP) == 0)
-			continue;
 		VM_OBJECT_WLOCK(obj);
-		if (obj->type != OBJT_DEFAULT &&
-		    (obj->flags & OBJ_SWAP) == 0) {
+		if ((obj->flags & OBJ_SWAP) == 0) {
 			VM_OBJECT_WUNLOCK(obj);
 			continue;
 		}
@@ -4139,8 +4135,7 @@ vm_map_copy_entry(
 		 */
 		size = src_entry->end - src_entry->start;
 		if ((src_object = src_entry->object.vm_object) != NULL) {
-			if (src_object->type == OBJT_DEFAULT ||
-			    (src_object->flags & OBJ_SWAP) != 0) {
+			if ((src_object->flags & OBJ_SWAP) != 0) {
 				vm_map_copy_swap_object(src_entry, dst_entry,
 				    size, fork_charge);
 				/* May have split/collapsed, reload obj. */
@@ -4250,7 +4245,7 @@ vmspace_fork(struct vmspace *vm1, vm_ooffset_t *fork_charge)
 	vm_map_t new_map, old_map;
 	vm_map_entry_t new_entry, old_entry;
 	vm_object_t object;
-	int error, locked;
+	int error, locked __diagused;
 	vm_inherit_t inh;
 
 	old_map = &vm1->vm_map;
@@ -4264,6 +4259,7 @@ vmspace_fork(struct vmspace *vm1, vm_ooffset_t *fork_charge)
 	vm2->vm_daddr = vm1->vm_daddr;
 	vm2->vm_maxsaddr = vm1->vm_maxsaddr;
 	vm2->vm_stacktop = vm1->vm_stacktop;
+	vm2->vm_shp_base = vm1->vm_shp_base;
 	vm_map_lock(old_map);
 	if (old_map->busy)
 		vm_map_wait_busy(old_map);
@@ -4600,13 +4596,13 @@ vm_map_growstack(vm_map_t map, vm_offset_t addr, vm_map_entry_t gap_entry)
 	vm_offset_t gap_end, gap_start, grow_start;
 	vm_size_t grow_amount, guard, max_grow;
 	rlim_t lmemlim, stacklim, vmemlim;
-	int rv, rv1;
+	int rv, rv1 __diagused;
 	bool gap_deleted, grow_down, is_procstack;
 #ifdef notyet
 	uint64_t limit;
 #endif
 #ifdef RACCT
-	int error;
+	int error __diagused;
 #endif
 
 	p = curproc;
@@ -5059,7 +5055,7 @@ RetryLookupLocked:
 		if (vm_map_lock_upgrade(map))
 			goto RetryLookup;
 		entry->object.vm_object = vm_object_allocate_anon(atop(size),
-		    NULL, entry->cred, entry->cred != NULL ? size : 0);
+		    NULL, entry->cred, size);
 		entry->offset = 0;
 		entry->cred = NULL;
 		vm_map_lock_downgrade(map);

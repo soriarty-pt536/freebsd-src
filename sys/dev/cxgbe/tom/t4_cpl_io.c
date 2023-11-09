@@ -288,7 +288,7 @@ send_reset(struct adapter *sc, struct toepcb *toep, uint32_t snd_nxt)
 	 * XXX: What's the correct way to tell that the inp hasn't been detached
 	 * from its socket?  Should I even be flushing the snd buffer here?
 	 */
-	if ((inp->inp_flags & (INP_DROPPED | INP_TIMEWAIT)) == 0) {
+	if ((inp->inp_flags & INP_DROPPED) == 0) {
 		struct socket *so = inp->inp_socket;
 
 		if (so != NULL)	/* because I'm not sure.  See comment above */
@@ -803,7 +803,7 @@ t4_push_frames(struct adapter *sc, struct toepcb *toep, int drop)
 			int newsize = min(sb->sb_hiwat + V_tcp_autosndbuf_inc,
 			    V_tcp_autosndbuf_max);
 
-			if (!sbreserve_locked(sb, newsize, so, NULL))
+			if (!sbreserve_locked(so, SO_SND, newsize, NULL))
 				sb->sb_flags &= ~SB_AUTOSIZE;
 			else
 				sowwakeup = 1;	/* room available */
@@ -1002,7 +1002,7 @@ write_iscsi_mbuf_wr(struct toepcb *toep, struct mbuf *sndptr)
 	int tx_credits, shove, npdu, wr_len;
 	uint16_t iso_mss;
 	static const u_int ulp_extra_len[] = {0, 4, 4, 8};
-	bool iso;
+	bool iso, nomap_mbuf_seen;
 
 	M_ASSERTPKTHDR(sndptr);
 
@@ -1030,8 +1030,15 @@ write_iscsi_mbuf_wr(struct toepcb *toep, struct mbuf *sndptr)
 	plen = 0;
 	nsegs = 0;
 	max_nsegs_1mbuf = 0; /* max # of SGL segments in any one mbuf */
+	nomap_mbuf_seen = false;
 	for (m = sndptr; m != NULL; m = m->m_next) {
-		int n = sglist_count(mtod(m, void *), m->m_len);
+		int n;
+
+		if (m->m_flags & M_EXTPG)
+			n = sglist_count_mbuf_epg(m, mtod(m, vm_offset_t),
+			    m->m_len);
+		else
+			n = sglist_count(mtod(m, void *), m->m_len);
 
 		nsegs += n;
 		plen += m->m_len;
@@ -1040,9 +1047,11 @@ write_iscsi_mbuf_wr(struct toepcb *toep, struct mbuf *sndptr)
 		 * This mbuf would send us _over_ the nsegs limit.
 		 * Suspend tx because the PDU can't be sent out.
 		 */
-		if (plen > max_imm && nsegs > max_nsegs)
+		if ((nomap_mbuf_seen || plen > max_imm) && nsegs > max_nsegs)
 			return (NULL);
 
+		if (m->m_flags & M_EXTPG)
+			nomap_mbuf_seen = true;
 		if (max_nsegs_1mbuf < n)
 			max_nsegs_1mbuf = n;
 	}
@@ -1075,7 +1084,7 @@ write_iscsi_mbuf_wr(struct toepcb *toep, struct mbuf *sndptr)
 	wr_len = sizeof(*txwr);
 	if (iso)
 		wr_len += sizeof(struct cpl_tx_data_iso);
-	if (plen <= max_imm) {
+	if (plen <= max_imm && !nomap_mbuf_seen) {
 		/* Immediate data tx */
 		imm_data = plen;
 		wr_len += plen;
@@ -1602,7 +1611,7 @@ do_abort_req(struct sge_iq *iq, const struct rss_header *rss, struct mbuf *m)
 	}
 	toep->flags |= TPF_ABORT_SHUTDOWN;
 
-	if ((inp->inp_flags & (INP_DROPPED | INP_TIMEWAIT)) == 0) {
+	if ((inp->inp_flags & INP_DROPPED) == 0) {
 		struct socket *so = inp->inp_socket;
 
 		if (so != NULL)
@@ -1692,7 +1701,7 @@ do_rx_data(struct sge_iq *iq, const struct rss_header *rss, struct mbuf *m)
 	len = m->m_pkthdr.len;
 
 	INP_WLOCK(inp);
-	if (inp->inp_flags & (INP_DROPPED | INP_TIMEWAIT)) {
+	if (inp->inp_flags & INP_DROPPED) {
 		CTR4(KTR_CXGBE, "%s: tid %u, rx (%d bytes), inp_flags 0x%x",
 		    __func__, tid, len, inp->inp_flags);
 		INP_WUNLOCK(inp);
@@ -1761,7 +1770,7 @@ do_rx_data(struct sge_iq *iq, const struct rss_header *rss, struct mbuf *m)
 		unsigned int newsize = min(hiwat + sc->tt.autorcvbuf_inc,
 		    V_tcp_autorcvbuf_max);
 
-		if (!sbreserve_locked(sb, newsize, so, NULL))
+		if (!sbreserve_locked(so, SO_RCV, newsize, NULL))
 			sb->sb_flags &= ~SB_AUTOSIZE;
 	}
 
@@ -1865,7 +1874,7 @@ do_fw4_ack(struct sge_iq *iq, const struct rss_header *rss, struct mbuf *m)
 		return (0);
 	}
 
-	KASSERT((inp->inp_flags & (INP_TIMEWAIT | INP_DROPPED)) == 0,
+	KASSERT((inp->inp_flags & INP_DROPPED) == 0,
 	    ("%s: inp_flags 0x%x", __func__, inp->inp_flags));
 
 	tp = intotcpcb(inp);
@@ -2044,7 +2053,7 @@ t4_uninit_cpl_io_handlers(void)
 #define	aio_refs	backend4
 
 #define	jobtotid(job)							\
-	(((struct toepcb *)(so_sototcpcb((job)->fd_file->f_data)->t_toe))->tid)
+	(((struct toepcb *)(sototcpcb((job)->fd_file->f_data)->t_toe))->tid)
 
 static void
 aiotx_free_job(struct kaiocb *job)
@@ -2183,7 +2192,6 @@ static void
 t4_aiotx_process_job(struct toepcb *toep, struct socket *so, struct kaiocb *job)
 {
 	struct sockbuf *sb;
-	struct file *fp;
 	struct inpcb *inp;
 	struct tcpcb *tp;
 	struct mbuf *m;
@@ -2192,11 +2200,10 @@ t4_aiotx_process_job(struct toepcb *toep, struct socket *so, struct kaiocb *job)
 
 	sb = &so->so_snd;
 	SOCKBUF_UNLOCK(sb);
-	fp = job->fd_file;
 	m = NULL;
 
 #ifdef MAC
-	error = mac_socket_check_send(fp->f_cred, so);
+	error = mac_socket_check_send(job->fd_file->f_cred, so);
 	if (error != 0)
 		goto out;
 #endif
@@ -2283,7 +2290,7 @@ sendanother:
 
 	inp = toep->inp;
 	INP_WLOCK(inp);
-	if (inp->inp_flags & (INP_TIMEWAIT | INP_DROPPED)) {
+	if (inp->inp_flags & INP_DROPPED) {
 		INP_WUNLOCK(inp);
 		SOCK_IO_SEND_UNLOCK(so);
 		error = ECONNRESET;
@@ -2408,7 +2415,7 @@ t4_aiotx_cancel(struct kaiocb *job)
 	struct toepcb *toep;
 
 	so = job->fd_file->f_data;
-	tp = so_sototcpcb(so);
+	tp = sototcpcb(so);
 	toep = tp->t_toe;
 	MPASS(job->uaiocb.aio_lio_opcode == LIO_WRITE);
 	sb = &so->so_snd;
@@ -2425,7 +2432,7 @@ t4_aiotx_cancel(struct kaiocb *job)
 int
 t4_aio_queue_aiotx(struct socket *so, struct kaiocb *job)
 {
-	struct tcpcb *tp = so_sototcpcb(so);
+	struct tcpcb *tp = sototcpcb(so);
 	struct toepcb *toep = tp->t_toe;
 	struct adapter *sc = td_adapter(toep->td);
 

@@ -315,7 +315,7 @@ void moea_cpu_bootstrap(int);
 void moea_bootstrap(vm_offset_t, vm_offset_t);
 void *moea_mapdev(vm_paddr_t, vm_size_t);
 void *moea_mapdev_attr(vm_paddr_t, vm_size_t, vm_memattr_t);
-void moea_unmapdev(vm_offset_t, vm_size_t);
+void moea_unmapdev(void *, vm_size_t);
 vm_paddr_t moea_kextract(vm_offset_t);
 void moea_kenter_attr(vm_offset_t, vm_paddr_t, vm_memattr_t);
 void moea_kenter(vm_offset_t, vm_paddr_t);
@@ -1739,7 +1739,7 @@ moea_pinit(pmap_t pmap)
 		u_int	hash, n;
 
 		/*
-		 * Create a new value by mutiplying by a prime and adding in
+		 * Create a new value by multiplying by a prime and adding in
 		 * entropy from the timebase register.  This is to make the
 		 * VSID more random so that the PT hash function collides
 		 * less often.  (Note that the prime casues gcc to do shifts
@@ -2724,14 +2724,15 @@ moea_mapdev_attr(vm_paddr_t pa, vm_size_t size, vm_memattr_t ma)
 }
 
 void
-moea_unmapdev(vm_offset_t va, vm_size_t size)
+moea_unmapdev(void *p, vm_size_t size)
 {
-	vm_offset_t base, offset;
+	vm_offset_t base, offset, va;
 
 	/*
 	 * If this is outside kernel virtual space, then it's a
 	 * battable entry and doesn't require unmapping
 	 */
+	va = (vm_offset_t)p;
 	if ((va >= VM_MIN_KERNEL_ADDRESS) && (va <= virtual_end)) {
 		base = trunc_page(va);
 		offset = va & PAGE_MASK;

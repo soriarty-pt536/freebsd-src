@@ -800,6 +800,7 @@ ctl_isc_handler_finish_xfer(struct ctl_softc *ctl_softc,
 	}
 
 	ctsio = &msg_info->hdr.original_sc->scsiio;
+	ctsio->io_hdr.flags &= ~CTL_FLAG_SENT_2OTHER_SC;
 	ctsio->io_hdr.flags |= CTL_FLAG_IO_ACTIVE;
 	ctsio->io_hdr.msg_type = CTL_MSG_FINISH_IO;
 	ctsio->io_hdr.status = msg_info->hdr.status;
@@ -1101,7 +1102,14 @@ static void
 ctl_isc_ua(struct ctl_softc *softc, union ctl_ha_msg *msg, int len)
 {
 	struct ctl_lun *lun;
-	uint32_t iid = ctl_get_initindex(&msg->hdr.nexus);
+	uint32_t iid;
+
+	if (len < sizeof(msg->ua)) {
+		printf("%s: Received truncated message %d < %zu\n",
+		    __func__, len, sizeof(msg->ua));
+		ctl_ha_msg_abort(CTL_HA_CHAN_CTL);
+		return;
+	}
 
 	mtx_lock(&softc->ctl_lock);
 	if (msg->hdr.nexus.targ_mapped_lun >= ctl_max_luns ||
@@ -1113,6 +1121,7 @@ ctl_isc_ua(struct ctl_softc *softc, union ctl_ha_msg *msg, int len)
 	mtx_unlock(&softc->ctl_lock);
 	if (msg->ua.ua_type == CTL_UA_THIN_PROV_THRES && msg->ua.ua_set)
 		memcpy(lun->ua_tpt_info, msg->ua.ua_info, 8);
+	iid = ctl_get_initindex(&msg->hdr.nexus);
 	if (msg->ua.ua_all) {
 		if (msg->ua.ua_set)
 			ctl_est_ua_all(lun, iid, msg->ua.ua_type);
@@ -1135,6 +1144,20 @@ ctl_isc_lun_sync(struct ctl_softc *softc, union ctl_ha_msg *msg, int len)
 	int i, k;
 	ctl_lun_flags oflags;
 	uint32_t targ_lun;
+
+	if (len < offsetof(struct ctl_ha_msg_lun, data[0])) {
+		printf("%s: Received truncated message %d < %zu\n",
+		    __func__, len, offsetof(struct ctl_ha_msg_lun, data[0]));
+		ctl_ha_msg_abort(CTL_HA_CHAN_CTL);
+		return;
+	}
+	i = msg->lun.lun_devid_len + msg->lun.pr_key_count * sizeof(pr_key);
+	if (len < offsetof(struct ctl_ha_msg_lun, data[i])) {
+		printf("%s: Received truncated message data %d < %zu\n",
+		    __func__, len, offsetof(struct ctl_ha_msg_lun, data[i]));
+		ctl_ha_msg_abort(CTL_HA_CHAN_CTL);
+		return;
+	}
 
 	targ_lun = msg->hdr.nexus.targ_mapped_lun;
 	mtx_lock(&softc->ctl_lock);
@@ -1205,6 +1228,22 @@ ctl_isc_port_sync(struct ctl_softc *softc, union ctl_ha_msg *msg, int len)
 	struct ctl_port *port;
 	struct ctl_lun *lun;
 	int i, new;
+
+	if (len < offsetof(struct ctl_ha_msg_port, data[0])) {
+		printf("%s: Received truncated message %d < %zu\n",
+		    __func__, len, offsetof(struct ctl_ha_msg_port, data[0]));
+		ctl_ha_msg_abort(CTL_HA_CHAN_CTL);
+		return;
+	}
+	i = msg->port.name_len + msg->port.lun_map_len +
+	    msg->port.port_devid_len + msg->port.target_devid_len +
+	    msg->port.init_devid_len;
+	if (len < offsetof(struct ctl_ha_msg_port, data[i])) {
+		printf("%s: Received truncated message data %d < %zu\n",
+		    __func__, len, offsetof(struct ctl_ha_msg_port, data[i]));
+		ctl_ha_msg_abort(CTL_HA_CHAN_CTL);
+		return;
+	}
 
 	port = softc->ctl_ports[msg->hdr.nexus.targ_port];
 	if (port == NULL) {
@@ -1317,7 +1356,21 @@ static void
 ctl_isc_iid_sync(struct ctl_softc *softc, union ctl_ha_msg *msg, int len)
 {
 	struct ctl_port *port;
-	int iid;
+	int i, iid;
+
+	if (len < offsetof(struct ctl_ha_msg_iid, data[0])) {
+		printf("%s: Received truncated message %d < %zu\n",
+		    __func__, len, offsetof(struct ctl_ha_msg_iid, data[0]));
+		ctl_ha_msg_abort(CTL_HA_CHAN_CTL);
+		return;
+	}
+	i = msg->iid.name_len;
+	if (len < offsetof(struct ctl_ha_msg_iid, data[i])) {
+		printf("%s: Received truncated message data %d < %zu\n",
+		    __func__, len, offsetof(struct ctl_ha_msg_iid, data[i]));
+		ctl_ha_msg_abort(CTL_HA_CHAN_CTL);
+		return;
+	}
 
 	port = softc->ctl_ports[msg->hdr.nexus.targ_port];
 	if (port == NULL) {
@@ -1342,6 +1395,13 @@ ctl_isc_iid_sync(struct ctl_softc *softc, union ctl_ha_msg *msg, int len)
 static void
 ctl_isc_login(struct ctl_softc *softc, union ctl_ha_msg *msg, int len)
 {
+
+	if (len < sizeof(msg->login)) {
+		printf("%s: Received truncated message %d < %zu\n",
+		    __func__, len, sizeof(msg->login));
+		ctl_ha_msg_abort(CTL_HA_CHAN_CTL);
+		return;
+	}
 
 	if (msg->login.version != CTL_HA_VERSION) {
 		printf("CTL HA peers have different versions %d != %d\n",
@@ -1376,6 +1436,20 @@ ctl_isc_mode_sync(struct ctl_softc *softc, union ctl_ha_msg *msg, int len)
 	u_int i;
 	uint32_t initidx, targ_lun;
 
+	if (len < offsetof(struct ctl_ha_msg_mode, data[0])) {
+		printf("%s: Received truncated message %d < %zu\n",
+		    __func__, len, offsetof(struct ctl_ha_msg_mode, data[0]));
+		ctl_ha_msg_abort(CTL_HA_CHAN_CTL);
+		return;
+	}
+	i = msg->mode.page_len;
+	if (len < offsetof(struct ctl_ha_msg_mode, data[i])) {
+		printf("%s: Received truncated message data %d < %zu\n",
+		    __func__, len, offsetof(struct ctl_ha_msg_mode, data[i]));
+		ctl_ha_msg_abort(CTL_HA_CHAN_CTL);
+		return;
+	}
+
 	targ_lun = msg->hdr.nexus.targ_mapped_lun;
 	mtx_lock(&softc->ctl_lock);
 	if (targ_lun >= ctl_max_luns ||
@@ -1400,7 +1474,7 @@ ctl_isc_mode_sync(struct ctl_softc *softc, union ctl_ha_msg *msg, int len)
 		return;
 	}
 	memcpy(lun->mode_pages.index[i].page_data, msg->mode.data,
-	    lun->mode_pages.index[i].page_len);
+	    min(lun->mode_pages.index[i].page_len, msg->mode.page_len));
 	initidx = ctl_get_initindex(&msg->hdr.nexus);
 	if (initidx != -1)
 		ctl_est_ua_all(lun, initidx, CTL_UA_MODE_CHANGE);
@@ -1437,7 +1511,8 @@ ctl_isc_event_handler(ctl_ha_channel channel, ctl_ha_event event, int param)
 			return;
 		}
 
-		CTL_DEBUG_PRINT(("CTL: msg_type %d\n", msg->hdr.msg_type));
+		CTL_DEBUG_PRINT(("CTL: msg_type %d len %d\n",
+		    msg->hdr.msg_type, param));
 		switch (msg->hdr.msg_type) {
 		case CTL_MSG_SERIALIZE:
 			io = ctl_alloc_io(softc->othersc_pool);
@@ -2902,6 +2977,12 @@ ctl_ioctl(struct cdev *dev, u_long cmd, caddr_t addr, int flag,
 		}
 
 		if (lun_req->args != NULL) {
+			if (lun_req->args_len > CTL_MAX_ARGS_LEN) {
+				lun_req->status = CTL_LUN_ERROR;
+				snprintf(lun_req->error_str, sizeof(lun_req->error_str),
+				    "Too big args.");
+				break;
+			}
 			packed = malloc(lun_req->args_len, M_CTL, M_WAITOK);
 			if (copyin(lun_req->args, packed, lun_req->args_len) != 0) {
 				free(packed, M_CTL);
@@ -2923,6 +3004,7 @@ ctl_ioctl(struct cdev *dev, u_long cmd, caddr_t addr, int flag,
 		} else
 			lun_req->args_nvl = nvlist_create(0);
 
+		lun_req->result_nvl = NULL;
 		retval = backend->ioctl(dev, cmd, addr, flag, td);
 		nvlist_destroy(lun_req->args_nvl);
 		lun_req->args_nvl = tmp_args_nvl;
@@ -3179,6 +3261,12 @@ ctl_ioctl(struct cdev *dev, u_long cmd, caddr_t addr, int flag,
 		}
 
 		if (req->args != NULL) {
+			if (req->args_len > CTL_MAX_ARGS_LEN) {
+				req->status = CTL_LUN_ERROR;
+				snprintf(req->error_str, sizeof(req->error_str),
+				    "Too big args.");
+				break;
+			}
 			packed = malloc(req->args_len, M_CTL, M_WAITOK);
 			if (copyin(req->args, packed, req->args_len) != 0) {
 				free(packed, M_CTL);
@@ -3200,6 +3288,7 @@ ctl_ioctl(struct cdev *dev, u_long cmd, caddr_t addr, int flag,
 		} else
 			req->args_nvl = nvlist_create(0);
 
+		req->result_nvl = NULL;
 		if (fe->ioctl)
 			retval = fe->ioctl(dev, cmd, addr, flag, td);
 		else
@@ -11584,6 +11673,8 @@ ctl_scsiio_precheck(struct ctl_scsiio *ctsio)
 		if ((isc_retval = ctl_ha_msg_send(CTL_HA_CHAN_CTL, &msg_info,
 		    sizeof(msg_info.scsi) - sizeof(msg_info.scsi.sense_data),
 		    M_WAITOK)) > CTL_HA_STATUS_SUCCESS) {
+			ctsio->io_hdr.flags &= ~CTL_FLAG_SENT_2OTHER_SC;
+			ctsio->io_hdr.flags |= CTL_FLAG_IO_ACTIVE;
 			ctl_set_busy(ctsio);
 			ctl_done((union ctl_io *)ctsio);
 			return;

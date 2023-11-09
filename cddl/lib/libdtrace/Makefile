@@ -70,7 +70,6 @@ SYSINCSDIR=	${INCLUDEDIR}/sys
 INCS+=		${SRCTOP}/cddl/contrib/opensolaris/lib/libdtrace/common/dtrace.h
 SYSINCS+=	${SRCTOP}/sys/cddl/contrib/opensolaris/uts/common/sys/dtrace.h
 SYSINCS+=	${SRCTOP}/sys/cddl/contrib/opensolaris/uts/common/sys/ctf_api.h
-SYSINCS+=	${SRCTOP}/sys/cddl/contrib/opensolaris/uts/common/sys/ctf.h
 
 WARNS?=		1
 
@@ -85,6 +84,7 @@ CFLAGS+= -DHAVE_ISSETUGID
 
 CFLAGS+=	-I${.OBJDIR} -I${.CURDIR} \
 		-I${SRCTOP}/sys/cddl/dev/dtrace/${MACHINE_ARCH} \
+		-I${SRCTOP}/sys/cddl/dev/kinst \
 		-I${SRCTOP}/sys/cddl/compat/opensolaris \
 		-I${SRCTOP}/cddl/compat/opensolaris/include \
 		-I${OPENSOLARIS_USR_DISTDIR}/head \
@@ -108,10 +108,6 @@ CFLAGS+=	-I${OPENSOLARIS_SYS_DISTDIR}/uts/intel -DDIS_MEM
 CFLAGS+=	-I${OPENSOLARIS_SYS_DISTDIR}/uts/arm
 .PATH:		${SRCTOP}/cddl/contrib/opensolaris/lib/libdtrace/arm
 .PATH:		${SRCTOP}/sys/cddl/dev/dtrace/arm
-.elif ${MACHINE_CPUARCH} == "mips"
-CFLAGS+=	-I${OPENSOLARIS_SYS_DISTDIR}/uts/mips
-.PATH:		${SRCTOP}/cddl/contrib/opensolaris/lib/libdtrace/mips
-.PATH:		${SRCTOP}/sys/cddl/dev/dtrace/mips
 .elif ${MACHINE_CPUARCH} == "powerpc"
 CFLAGS+=	-I${OPENSOLARIS_SYS_DISTDIR}/uts/powerpc
 .PATH:		${SRCTOP}/cddl/contrib/opensolaris/lib/libdtrace/powerpc

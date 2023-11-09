@@ -207,33 +207,8 @@ specified_ro(const char *arg)
 static void
 restart_mountd(void)
 {
-	struct pidfh *pfh;
-	pid_t mountdpid;
 
-	mountdpid = 0;
-	pfh = pidfile_open(_PATH_MOUNTDPID, 0600, &mountdpid);
-	if (pfh != NULL) {
-		/* Mountd is not running. */
-		pidfile_remove(pfh);
-		return;
-	}
-	if (errno != EEXIST) {
-		/* Cannot open pidfile for some reason. */
-		return;
-	}
-
-	/*
-	 * Refuse to send broadcast or group signals, this has
-	 * happened due to the bugs in pidfile(3).
-	 */
-	if (mountdpid <= 0) {
-		xo_warnx("mountd pid %d, refusing to send SIGHUP", mountdpid);
-		return;
-	}
-
-	/* We have mountd(8) PID in mountdpid varible, let's signal it. */
-	if (kill(mountdpid, SIGHUP) == -1)
-		xo_err(1, "signal mountd");
+	pidfile_signal(_PATH_MOUNTDPID, SIGHUP, NULL);
 }
 
 int
@@ -502,7 +477,7 @@ ismounted(struct fstab *fs, struct statfs *mntbuf, int mntsize)
 
 	/* 
 	 * Consider the filesystem to be mounted if:
-	 * It has the same mountpoint as a mounted filesytem, and
+	 * It has the same mountpoint as a mounted filesystem, and
 	 * It has the same type as that same mounted filesystem, and
 	 * It has the same device name as that same mounted filesystem, OR
 	 *     It is a nonremountable filesystem
@@ -716,6 +691,12 @@ prmount(struct statfs *sfp)
 			fsidbuf[i * 2] = '\0';
 			xo_emit("{D:, }{Lw:fsid}{:fsid}", fsidbuf);
 			free(fsidbuf);
+		}
+		if (sfp->f_nvnodelistsize != 0) {
+			xo_open_container("vnodes");
+			xo_emit("{D:, }{Lwc:vnodes}{Lw:count}{w:count/%ju}",
+			    (uintmax_t)sfp->f_nvnodelistsize);
+			xo_close_container("vnodes");
 		}
 	}
 	xo_emit("{D:)}\n");

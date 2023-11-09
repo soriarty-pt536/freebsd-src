@@ -6,7 +6,7 @@
  * You may not use this file except in compliance with the License.
  *
  * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
- * or http://www.opensolaris.org/os/licensing.
+ * or https://opensource.org/licenses/CDDL-1.0.
  * See the License for the specific language governing permissions
  * and limitations under the License.
  *
@@ -250,7 +250,7 @@
  * since the physical block is about to be rewritten. The new data contents
  * will be contained in the arc_buf_t. As the I/O pipeline performs the write,
  * it may compress the data before writing it to disk. The ARC will be called
- * with the transformed data and will bcopy the transformed on-disk block into
+ * with the transformed data and will memcpy the transformed on-disk block into
  * a newly allocated b_pabd. Writes are always done into buffers which have
  * either been loaned (and hence are new and don't have other readers) or
  * buffers which have been released (and hence have their own hdr, if there
@@ -354,7 +354,7 @@ static list_t arc_evict_waiters;
  * can still happen, even during the potentially long time that arc_size is
  * more than arc_c.
  */
-static int zfs_arc_eviction_pct = 200;
+static uint_t zfs_arc_eviction_pct = 200;
 
 /*
  * The number of headers to evict in arc_evict_state_impl() before
@@ -363,10 +363,10 @@ static int zfs_arc_eviction_pct = 200;
  * oldest header in the arc state), but comes with higher overhead
  * (i.e. more invocations of arc_evict_state_impl()).
  */
-static int zfs_arc_evict_batch_limit = 10;
+static uint_t zfs_arc_evict_batch_limit = 10;
 
 /* number of seconds before growing cache again */
-int arc_grow_retry = 5;
+uint_t arc_grow_retry = 5;
 
 /*
  * Minimum time between calls to arc_kmem_reap_soon().
@@ -377,10 +377,10 @@ static const int arc_kmem_cache_reap_retry_ms = 1000;
 static int zfs_arc_overflow_shift = 8;
 
 /* shift of arc_c for calculating both min and max arc_p */
-static int arc_p_min_shift = 4;
+static uint_t arc_p_min_shift = 4;
 
 /* log2(fraction of arc to reclaim) */
-int arc_shrink_shift = 7;
+uint_t arc_shrink_shift = 7;
 
 /* percent of pagecache to reclaim arc to */
 #ifdef _KERNEL
@@ -396,20 +396,20 @@ uint_t zfs_arc_pc_percent = 0;
  * This must be less than arc_shrink_shift, so that when we shrink the ARC,
  * we will still not allow it to grow.
  */
-int			arc_no_grow_shift = 5;
+uint_t		arc_no_grow_shift = 5;
 
 
 /*
  * minimum lifespan of a prefetch block in clock ticks
  * (initialized in arc_init())
  */
-static int		arc_min_prefetch_ms;
-static int		arc_min_prescient_prefetch_ms;
+static uint_t		arc_min_prefetch_ms;
+static uint_t		arc_min_prescient_prefetch_ms;
 
 /*
  * If this percent of memory is free, don't throttle.
  */
-int arc_lotsfree_percent = 10;
+uint_t arc_lotsfree_percent = 10;
 
 /*
  * The arc has filled available memory and has now warmed up.
@@ -425,10 +425,10 @@ unsigned long zfs_arc_meta_limit = 0;
 unsigned long zfs_arc_meta_min = 0;
 static unsigned long zfs_arc_dnode_limit = 0;
 static unsigned long zfs_arc_dnode_reduce_percent = 10;
-static int zfs_arc_grow_retry = 0;
-static int zfs_arc_shrink_shift = 0;
-static int zfs_arc_p_min_shift = 0;
-int zfs_arc_average_blocksize = 8 * 1024; /* 8KB */
+static uint_t zfs_arc_grow_retry = 0;
+static uint_t zfs_arc_shrink_shift = 0;
+static uint_t zfs_arc_p_min_shift = 0;
+uint_t zfs_arc_average_blocksize = 8 * 1024; /* 8KB */
 
 /*
  * ARC dirty data constraints for arc_tempreserve_space() throttle:
@@ -460,13 +460,13 @@ static unsigned long zfs_arc_dnode_limit_percent = 10;
  * These tunables are Linux-specific
  */
 static unsigned long zfs_arc_sys_free = 0;
-static int zfs_arc_min_prefetch_ms = 0;
-static int zfs_arc_min_prescient_prefetch_ms = 0;
+static uint_t zfs_arc_min_prefetch_ms = 0;
+static uint_t zfs_arc_min_prescient_prefetch_ms = 0;
 static int zfs_arc_p_dampener_disable = 1;
-static int zfs_arc_meta_prune = 10000;
-static int zfs_arc_meta_strategy = ARC_STRATEGY_META_BALANCED;
-static int zfs_arc_meta_adjust_restarts = 4096;
-static int zfs_arc_lotsfree_percent = 10;
+static uint_t zfs_arc_meta_prune = 10000;
+static uint_t zfs_arc_meta_strategy = ARC_STRATEGY_META_BALANCED;
+static uint_t zfs_arc_meta_adjust_restarts = 4096;
+static uint_t zfs_arc_lotsfree_percent = 10;
 
 /*
  * Number of arc_prune threads
@@ -790,7 +790,7 @@ unsigned long l2arc_feed_min_ms = L2ARC_FEED_MIN_MS;	/* min interval msecs */
 int l2arc_noprefetch = B_TRUE;			/* don't cache prefetch bufs */
 int l2arc_feed_again = B_TRUE;			/* turbo warmup */
 int l2arc_norw = B_FALSE;			/* no reads during writes */
-static int l2arc_meta_percent = 33;		/* limit on headers size */
+static uint_t l2arc_meta_percent = 33;	/* limit on headers size */
 
 /*
  * L2ARC Internals
@@ -848,12 +848,13 @@ enum arc_hdr_alloc_flags {
 };
 
 
-static abd_t *arc_get_data_abd(arc_buf_hdr_t *, uint64_t, void *, int);
-static void *arc_get_data_buf(arc_buf_hdr_t *, uint64_t, void *);
-static void arc_get_data_impl(arc_buf_hdr_t *, uint64_t, void *, int);
-static void arc_free_data_abd(arc_buf_hdr_t *, abd_t *, uint64_t, void *);
-static void arc_free_data_buf(arc_buf_hdr_t *, void *, uint64_t, void *);
-static void arc_free_data_impl(arc_buf_hdr_t *hdr, uint64_t size, void *tag);
+static abd_t *arc_get_data_abd(arc_buf_hdr_t *, uint64_t, const void *, int);
+static void *arc_get_data_buf(arc_buf_hdr_t *, uint64_t, const void *);
+static void arc_get_data_impl(arc_buf_hdr_t *, uint64_t, const void *, int);
+static void arc_free_data_abd(arc_buf_hdr_t *, abd_t *, uint64_t, const void *);
+static void arc_free_data_buf(arc_buf_hdr_t *, void *, uint64_t, const void *);
+static void arc_free_data_impl(arc_buf_hdr_t *hdr, uint64_t size,
+    const void *tag);
 static void arc_hdr_free_abd(arc_buf_hdr_t *, boolean_t);
 static void arc_hdr_alloc_abd(arc_buf_hdr_t *, int);
 static void arc_access(arc_buf_hdr_t *, kmutex_t *);
@@ -928,7 +929,7 @@ static unsigned long l2arc_rebuild_blocks_min_l2size = 1024 * 1024 * 1024;
 
 /* L2ARC persistence rebuild control routines. */
 void l2arc_rebuild_vdev(vdev_t *vd, boolean_t reopen);
-static void l2arc_dev_rebuild_thread(void *arg);
+static __attribute__((noreturn)) void l2arc_dev_rebuild_thread(void *arg);
 static int l2arc_rebuild(l2arc_dev_t *dev);
 
 /* L2ARC persistence read I/O routines. */
@@ -1132,7 +1133,7 @@ hdr_full_cons(void *vbuf, void *unused, int kmflag)
 	(void) unused, (void) kmflag;
 	arc_buf_hdr_t *hdr = vbuf;
 
-	bzero(hdr, HDR_FULL_SIZE);
+	memset(hdr, 0, HDR_FULL_SIZE);
 	hdr->b_l1hdr.b_byteswap = DMU_BSWAP_NUMFUNCS;
 	cv_init(&hdr->b_l1hdr.b_cv, NULL, CV_DEFAULT, NULL);
 	zfs_refcount_create(&hdr->b_l1hdr.b_refcnt);
@@ -1152,7 +1153,7 @@ hdr_full_crypt_cons(void *vbuf, void *unused, int kmflag)
 	arc_buf_hdr_t *hdr = vbuf;
 
 	hdr_full_cons(vbuf, unused, kmflag);
-	bzero(&hdr->b_crypt_hdr, sizeof (hdr->b_crypt_hdr));
+	memset(&hdr->b_crypt_hdr, 0, sizeof (hdr->b_crypt_hdr));
 	arc_space_consume(sizeof (hdr->b_crypt_hdr), ARC_SPACE_HDRS);
 
 	return (0);
@@ -1164,7 +1165,7 @@ hdr_l2only_cons(void *vbuf, void *unused, int kmflag)
 	(void) unused, (void) kmflag;
 	arc_buf_hdr_t *hdr = vbuf;
 
-	bzero(hdr, HDR_L2ONLY_SIZE);
+	memset(hdr, 0, HDR_L2ONLY_SIZE);
 	arc_space_consume(HDR_L2ONLY_SIZE, ARC_SPACE_L2HDRS);
 
 	return (0);
@@ -1176,7 +1177,7 @@ buf_cons(void *vbuf, void *unused, int kmflag)
 	(void) unused, (void) kmflag;
 	arc_buf_t *buf = vbuf;
 
-	bzero(buf, sizeof (arc_buf_t));
+	memset(buf, 0, sizeof (arc_buf_t));
 	mutex_init(&buf->b_evict_lock, NULL, MUTEX_DEFAULT, NULL);
 	arc_space_consume(sizeof (arc_buf_t), ARC_SPACE_HDRS);
 
@@ -1204,11 +1205,11 @@ hdr_full_dest(void *vbuf, void *unused)
 static void
 hdr_full_crypt_dest(void *vbuf, void *unused)
 {
-	(void) unused;
-	arc_buf_hdr_t *hdr = vbuf;
+	(void) vbuf, (void) unused;
 
 	hdr_full_dest(vbuf, unused);
-	arc_space_return(sizeof (hdr->b_crypt_hdr), ARC_SPACE_HDRS);
+	arc_space_return(sizeof (((arc_buf_hdr_t *)NULL)->b_crypt_hdr),
+	    ARC_SPACE_HDRS);
 }
 
 static void
@@ -1332,9 +1333,9 @@ arc_get_raw_params(arc_buf_t *buf, boolean_t *byteorder, uint8_t *salt,
 
 	ASSERT(HDR_PROTECTED(hdr));
 
-	bcopy(hdr->b_crypt_hdr.b_salt, salt, ZIO_DATA_SALT_LEN);
-	bcopy(hdr->b_crypt_hdr.b_iv, iv, ZIO_DATA_IV_LEN);
-	bcopy(hdr->b_crypt_hdr.b_mac, mac, ZIO_DATA_MAC_LEN);
+	memcpy(salt, hdr->b_crypt_hdr.b_salt, ZIO_DATA_SALT_LEN);
+	memcpy(iv, hdr->b_crypt_hdr.b_iv, ZIO_DATA_IV_LEN);
+	memcpy(mac, hdr->b_crypt_hdr.b_mac, ZIO_DATA_MAC_LEN);
 	*byteorder = (hdr->b_l1hdr.b_byteswap == DMU_BSWAP_NUMFUNCS) ?
 	    ZFS_HOST_BYTEORDER : !ZFS_HOST_BYTEORDER;
 }
@@ -1692,7 +1693,7 @@ arc_buf_try_copy_decompressed_data(arc_buf_t *buf)
 		}
 
 		if (!ARC_BUF_COMPRESSED(from)) {
-			bcopy(from->b_data, buf->b_data, arc_buf_size(buf));
+			memcpy(buf->b_data, from->b_data, arc_buf_size(buf));
 			copied = B_TRUE;
 			break;
 		}
@@ -2280,7 +2281,7 @@ arc_evictable_space_decrement(arc_buf_hdr_t *hdr, arc_state_t *state)
  * it is not evictable.
  */
 static void
-add_reference(arc_buf_hdr_t *hdr, void *tag)
+add_reference(arc_buf_hdr_t *hdr, const void *tag)
 {
 	arc_state_t *state;
 
@@ -2316,7 +2317,7 @@ add_reference(arc_buf_hdr_t *hdr, void *tag)
  * list making it eligible for eviction.
  */
 static int
-remove_reference(arc_buf_hdr_t *hdr, kmutex_t *hash_lock, void *tag)
+remove_reference(arc_buf_hdr_t *hdr, kmutex_t *hash_lock, const void *tag)
 {
 	int cnt;
 	arc_state_t *state = hdr->b_l1hdr.b_state;
@@ -2740,8 +2741,8 @@ arc_can_share(arc_buf_hdr_t *hdr, arc_buf_t *buf)
  */
 static int
 arc_buf_alloc_impl(arc_buf_hdr_t *hdr, spa_t *spa, const zbookmark_phys_t *zb,
-    void *tag, boolean_t encrypted, boolean_t compressed, boolean_t noauth,
-    boolean_t fill, arc_buf_t **ret)
+    const void *tag, boolean_t encrypted, boolean_t compressed,
+    boolean_t noauth, boolean_t fill, arc_buf_t **ret)
 {
 	arc_buf_t *buf;
 	arc_fill_flags_t flags = ARC_FILL_LOCKED;
@@ -2841,7 +2842,7 @@ arc_buf_alloc_impl(arc_buf_hdr_t *hdr, spa_t *spa, const zbookmark_phys_t *zb,
 	return (0);
 }
 
-static char *arc_onloan_tag = "onloan";
+static const char *arc_onloan_tag = "onloan";
 
 static inline void
 arc_loaned_bytes_update(int64_t delta)
@@ -2900,7 +2901,7 @@ arc_loan_raw_buf(spa_t *spa, uint64_t dsobj, boolean_t byteorder,
  * Return a loaned arc buffer to the arc.
  */
 void
-arc_return_buf(arc_buf_t *buf, void *tag)
+arc_return_buf(arc_buf_t *buf, const void *tag)
 {
 	arc_buf_hdr_t *hdr = buf->b_hdr;
 
@@ -2914,7 +2915,7 @@ arc_return_buf(arc_buf_t *buf, void *tag)
 
 /* Detach an arc_buf from a dbuf (tag) */
 void
-arc_loan_inuse_buf(arc_buf_t *buf, void *tag)
+arc_loan_inuse_buf(arc_buf_t *buf, const void *tag)
 {
 	arc_buf_hdr_t *hdr = buf->b_hdr;
 
@@ -3349,7 +3350,7 @@ arc_hdr_realloc(arc_buf_hdr_t *hdr, kmem_cache_t *old, kmem_cache_t *new)
 	ASSERT(MUTEX_HELD(HDR_LOCK(hdr)));
 	buf_hash_remove(hdr);
 
-	bcopy(hdr, nhdr, HDR_L2ONLY_SIZE);
+	memcpy(nhdr, hdr, HDR_L2ONLY_SIZE);
 
 	if (new == hdr_full_cache || new == hdr_full_crypt_cache) {
 		arc_hdr_set_flags(nhdr, ARC_FLAG_HAS_L1HDR);
@@ -3512,7 +3513,7 @@ arc_hdr_realloc_crypt(arc_buf_hdr_t *hdr, boolean_t need_crypt)
 	}
 
 	/* unset all members of the original hdr */
-	bzero(&hdr->b_dva, sizeof (dva_t));
+	memset(&hdr->b_dva, 0, sizeof (dva_t));
 	hdr->b_birth = 0;
 	hdr->b_type = ARC_BUFC_INVALID;
 	hdr->b_flags = 0;
@@ -3537,9 +3538,9 @@ arc_hdr_realloc_crypt(arc_buf_hdr_t *hdr, boolean_t need_crypt)
 		hdr->b_crypt_hdr.b_ot = DMU_OT_NONE;
 		hdr->b_crypt_hdr.b_ebufcnt = 0;
 		hdr->b_crypt_hdr.b_dsobj = 0;
-		bzero(hdr->b_crypt_hdr.b_salt, ZIO_DATA_SALT_LEN);
-		bzero(hdr->b_crypt_hdr.b_iv, ZIO_DATA_IV_LEN);
-		bzero(hdr->b_crypt_hdr.b_mac, ZIO_DATA_MAC_LEN);
+		memset(hdr->b_crypt_hdr.b_salt, 0, ZIO_DATA_SALT_LEN);
+		memset(hdr->b_crypt_hdr.b_iv, 0, ZIO_DATA_IV_LEN);
+		memset(hdr->b_crypt_hdr.b_mac, 0, ZIO_DATA_MAC_LEN);
 	}
 
 	buf_discard_identity(hdr);
@@ -3577,11 +3578,11 @@ arc_convert_to_raw(arc_buf_t *buf, uint64_t dsobj, boolean_t byteorder,
 		arc_cksum_free(hdr);
 
 	if (salt != NULL)
-		bcopy(salt, hdr->b_crypt_hdr.b_salt, ZIO_DATA_SALT_LEN);
+		memcpy(hdr->b_crypt_hdr.b_salt, salt, ZIO_DATA_SALT_LEN);
 	if (iv != NULL)
-		bcopy(iv, hdr->b_crypt_hdr.b_iv, ZIO_DATA_IV_LEN);
+		memcpy(hdr->b_crypt_hdr.b_iv, iv, ZIO_DATA_IV_LEN);
 	if (mac != NULL)
-		bcopy(mac, hdr->b_crypt_hdr.b_mac, ZIO_DATA_MAC_LEN);
+		memcpy(hdr->b_crypt_hdr.b_mac, mac, ZIO_DATA_MAC_LEN);
 }
 
 /*
@@ -3589,7 +3590,8 @@ arc_convert_to_raw(arc_buf_t *buf, uint64_t dsobj, boolean_t byteorder,
  * The buf is returned thawed since we expect the consumer to modify it.
  */
 arc_buf_t *
-arc_alloc_buf(spa_t *spa, void *tag, arc_buf_contents_t type, int32_t size)
+arc_alloc_buf(spa_t *spa, const void *tag, arc_buf_contents_t type,
+    int32_t size)
 {
 	arc_buf_hdr_t *hdr = arc_hdr_alloc(spa_load_guid(spa), size, size,
 	    B_FALSE, ZIO_COMPRESS_OFF, 0, type);
@@ -3607,8 +3609,8 @@ arc_alloc_buf(spa_t *spa, void *tag, arc_buf_contents_t type, int32_t size)
  * for bufs containing metadata.
  */
 arc_buf_t *
-arc_alloc_compressed_buf(spa_t *spa, void *tag, uint64_t psize, uint64_t lsize,
-    enum zio_compress compression_type, uint8_t complevel)
+arc_alloc_compressed_buf(spa_t *spa, const void *tag, uint64_t psize,
+    uint64_t lsize, enum zio_compress compression_type, uint8_t complevel)
 {
 	ASSERT3U(lsize, >, 0);
 	ASSERT3U(lsize, >=, psize);
@@ -3635,9 +3637,9 @@ arc_alloc_compressed_buf(spa_t *spa, void *tag, uint64_t psize, uint64_t lsize,
 }
 
 arc_buf_t *
-arc_alloc_raw_buf(spa_t *spa, void *tag, uint64_t dsobj, boolean_t byteorder,
-    const uint8_t *salt, const uint8_t *iv, const uint8_t *mac,
-    dmu_object_type_t ot, uint64_t psize, uint64_t lsize,
+arc_alloc_raw_buf(spa_t *spa, const void *tag, uint64_t dsobj,
+    boolean_t byteorder, const uint8_t *salt, const uint8_t *iv,
+    const uint8_t *mac, dmu_object_type_t ot, uint64_t psize, uint64_t lsize,
     enum zio_compress compression_type, uint8_t complevel)
 {
 	arc_buf_hdr_t *hdr;
@@ -3657,9 +3659,9 @@ arc_alloc_raw_buf(spa_t *spa, void *tag, uint64_t dsobj, boolean_t byteorder,
 	hdr->b_crypt_hdr.b_ot = ot;
 	hdr->b_l1hdr.b_byteswap = (byteorder == ZFS_HOST_BYTEORDER) ?
 	    DMU_BSWAP_NUMFUNCS : DMU_OT_BYTESWAP(ot);
-	bcopy(salt, hdr->b_crypt_hdr.b_salt, ZIO_DATA_SALT_LEN);
-	bcopy(iv, hdr->b_crypt_hdr.b_iv, ZIO_DATA_IV_LEN);
-	bcopy(mac, hdr->b_crypt_hdr.b_mac, ZIO_DATA_MAC_LEN);
+	memcpy(hdr->b_crypt_hdr.b_salt, salt, ZIO_DATA_SALT_LEN);
+	memcpy(hdr->b_crypt_hdr.b_iv, iv, ZIO_DATA_IV_LEN);
+	memcpy(hdr->b_crypt_hdr.b_mac, mac, ZIO_DATA_MAC_LEN);
 
 	/*
 	 * This buffer will be considered encrypted even if the ot is not an
@@ -3844,7 +3846,7 @@ arc_hdr_destroy(arc_buf_hdr_t *hdr)
 }
 
 void
-arc_buf_destroy(arc_buf_t *buf, void* tag)
+arc_buf_destroy(arc_buf_t *buf, const void *tag)
 {
 	arc_buf_hdr_t *hdr = buf->b_hdr;
 
@@ -3896,7 +3898,7 @@ arc_evict_hdr(arc_buf_hdr_t *hdr, kmutex_t *hash_lock, uint64_t *real_evicted)
 {
 	arc_state_t *evicted_state, *state;
 	int64_t bytes_evicted = 0;
-	int min_lifetime = HDR_PRESCIENT_PREFETCH(hdr) ?
+	uint_t min_lifetime = HDR_PRESCIENT_PREFETCH(hdr) ?
 	    arc_min_prescient_prefetch_ms : arc_min_prefetch_ms;
 
 	ASSERT(MUTEX_HELD(hash_lock));
@@ -4051,7 +4053,7 @@ arc_evict_state_impl(multilist_t *ml, int idx, arc_buf_hdr_t *marker,
 	uint64_t bytes_evicted = 0, real_evicted = 0;
 	arc_buf_hdr_t *hdr;
 	kmutex_t *hash_lock;
-	int evict_count = zfs_arc_evict_batch_limit;
+	uint_t evict_count = zfs_arc_evict_batch_limit;
 
 	ASSERT3P(marker, !=, NULL);
 
@@ -4059,7 +4061,7 @@ arc_evict_state_impl(multilist_t *ml, int idx, arc_buf_hdr_t *marker,
 
 	for (hdr = multilist_sublist_prev(mls, marker); likely(hdr != NULL);
 	    hdr = multilist_sublist_prev(mls, marker)) {
-		if ((evict_count <= 0) || (bytes_evicted >= bytes))
+		if ((evict_count == 0) || (bytes_evicted >= bytes))
 			break;
 
 		/*
@@ -4163,7 +4165,7 @@ arc_evict_state_impl(multilist_t *ml, int idx, arc_buf_hdr_t *marker,
 	 * this CPU are able to make progress, make a voluntary preemption
 	 * call here.
 	 */
-	cond_resched();
+	kpreempt(KPREEMPT_SYNC);
 
 	return (bytes_evicted);
 }
@@ -4402,10 +4404,10 @@ arc_evict_impl(arc_state_t *state, uint64_t spa, int64_t bytes,
 static uint64_t
 arc_evict_meta_balanced(uint64_t meta_used)
 {
-	int64_t delta, prune = 0, adjustmnt;
-	uint64_t total_evicted = 0;
+	int64_t delta, adjustmnt;
+	uint64_t total_evicted = 0, prune = 0;
 	arc_buf_contents_t type = ARC_BUFC_DATA;
-	int restarts = MAX(zfs_arc_meta_adjust_restarts, 0);
+	uint_t restarts = zfs_arc_meta_adjust_restarts;
 
 restart:
 	/*
@@ -5049,10 +5051,11 @@ arc_reap_cb(void *arg, zthr_t *zthr)
 	 */
 	free_memory = arc_available_memory();
 
-	int64_t to_free =
-	    (arc_c >> arc_shrink_shift) - free_memory;
-	if (to_free > 0) {
-		arc_reduce_target_size(to_free);
+	int64_t can_free = arc_c - arc_c_min;
+	if (can_free > 0) {
+		int64_t to_free = (can_free >> arc_shrink_shift) - free_memory;
+		if (to_free > 0)
+			arc_reduce_target_size(to_free);
 	}
 	spl_fstrans_unmark(cookie);
 }
@@ -5207,7 +5210,7 @@ arc_is_overflowing(boolean_t use_reserve)
 }
 
 static abd_t *
-arc_get_data_abd(arc_buf_hdr_t *hdr, uint64_t size, void *tag,
+arc_get_data_abd(arc_buf_hdr_t *hdr, uint64_t size, const void *tag,
     int alloc_flags)
 {
 	arc_buf_contents_t type = arc_buf_type(hdr);
@@ -5222,7 +5225,7 @@ arc_get_data_abd(arc_buf_hdr_t *hdr, uint64_t size, void *tag,
 }
 
 static void *
-arc_get_data_buf(arc_buf_hdr_t *hdr, uint64_t size, void *tag)
+arc_get_data_buf(arc_buf_hdr_t *hdr, uint64_t size, const void *tag)
 {
 	arc_buf_contents_t type = arc_buf_type(hdr);
 
@@ -5321,7 +5324,7 @@ arc_wait_for_eviction(uint64_t amount, boolean_t use_reserve)
  * limit, we'll only signal the reclaim thread and continue on.
  */
 static void
-arc_get_data_impl(arc_buf_hdr_t *hdr, uint64_t size, void *tag,
+arc_get_data_impl(arc_buf_hdr_t *hdr, uint64_t size, const void *tag,
     int alloc_flags)
 {
 	arc_state_t *state = hdr->b_l1hdr.b_state;
@@ -5389,14 +5392,15 @@ arc_get_data_impl(arc_buf_hdr_t *hdr, uint64_t size, void *tag,
 }
 
 static void
-arc_free_data_abd(arc_buf_hdr_t *hdr, abd_t *abd, uint64_t size, void *tag)
+arc_free_data_abd(arc_buf_hdr_t *hdr, abd_t *abd, uint64_t size,
+    const void *tag)
 {
 	arc_free_data_impl(hdr, size, tag);
 	abd_free(abd);
 }
 
 static void
-arc_free_data_buf(arc_buf_hdr_t *hdr, void *buf, uint64_t size, void *tag)
+arc_free_data_buf(arc_buf_hdr_t *hdr, void *buf, uint64_t size, const void *tag)
 {
 	arc_buf_contents_t type = arc_buf_type(hdr);
 
@@ -5413,7 +5417,7 @@ arc_free_data_buf(arc_buf_hdr_t *hdr, void *buf, uint64_t size, void *tag)
  * Free the arc data buffer.
  */
 static void
-arc_free_data_impl(arc_buf_hdr_t *hdr, uint64_t size, void *tag)
+arc_free_data_impl(arc_buf_hdr_t *hdr, uint64_t size, const void *tag)
 {
 	arc_state_t *state = hdr->b_l1hdr.b_state;
 	arc_buf_contents_t type = arc_buf_type(hdr);
@@ -5643,7 +5647,7 @@ arc_bcopy_func(zio_t *zio, const zbookmark_phys_t *zb, const blkptr_t *bp,
 	if (buf == NULL)
 		return;
 
-	bcopy(buf->b_data, arg, arc_buf_size(buf));
+	memcpy(arg, buf->b_data, arc_buf_size(buf));
 	arc_buf_destroy(buf, arg);
 }
 
@@ -6028,6 +6032,23 @@ top:
 				arc_hdr_clear_flags(hdr,
 				    ARC_FLAG_PREDICTIVE_PREFETCH);
 			}
+
+			/*
+			 * If there are multiple threads reading the same block
+			 * and that block is not yet in the ARC, then only one
+			 * thread will do the physical I/O and all other
+			 * threads will wait until that I/O completes.
+			 * Synchronous reads use the b_cv whereas nowait reads
+			 * register a callback. Both are signalled/called in
+			 * arc_read_done.
+			 *
+			 * Errors of the physical I/O may need to be propagated
+			 * to the pio. For synchronous reads, we simply restart
+			 * this function and it will reassess.  Nowait reads
+			 * attach the acb_zio_dummy zio to pio and
+			 * arc_read_done propagates the physical I/O's io_error
+			 * to acb_zio_dummy, and thereby to pio.
+			 */
 
 			if (*arc_flags & ARC_FLAG_WAIT) {
 				cv_wait(&hdr->b_l1hdr.b_cv, hash_lock);
@@ -6575,7 +6596,7 @@ arc_freed(spa_t *spa, const blkptr_t *bp)
  * a new hdr for the buffer.
  */
 void
-arc_release(arc_buf_t *buf, void *tag)
+arc_release(arc_buf_t *buf, const void *tag)
 {
 	arc_buf_hdr_t *hdr = buf->b_hdr;
 
@@ -7106,11 +7127,11 @@ arc_write(zio_t *pio, spa_t *spa, uint64_t txg,
 		localprop.zp_byteorder =
 		    (hdr->b_l1hdr.b_byteswap == DMU_BSWAP_NUMFUNCS) ?
 		    ZFS_HOST_BYTEORDER : !ZFS_HOST_BYTEORDER;
-		bcopy(hdr->b_crypt_hdr.b_salt, localprop.zp_salt,
+		memcpy(localprop.zp_salt, hdr->b_crypt_hdr.b_salt,
 		    ZIO_DATA_SALT_LEN);
-		bcopy(hdr->b_crypt_hdr.b_iv, localprop.zp_iv,
+		memcpy(localprop.zp_iv, hdr->b_crypt_hdr.b_iv,
 		    ZIO_DATA_IV_LEN);
-		bcopy(hdr->b_crypt_hdr.b_mac, localprop.zp_mac,
+		memcpy(localprop.zp_mac, hdr->b_crypt_hdr.b_mac,
 		    ZIO_DATA_MAC_LEN);
 		if (DMU_OT_IS_ENCRYPTED(localprop.zp_type)) {
 			localprop.zp_nopwrite = B_FALSE;
@@ -7635,15 +7656,14 @@ arc_tuning_update(boolean_t verbose)
 	}
 
 	/* Valid range: 0 - 100 */
-	if ((zfs_arc_lotsfree_percent >= 0) &&
-	    (zfs_arc_lotsfree_percent <= 100))
+	if (zfs_arc_lotsfree_percent <= 100)
 		arc_lotsfree_percent = zfs_arc_lotsfree_percent;
 	WARN_IF_TUNING_IGNORED(zfs_arc_lotsfree_percent, arc_lotsfree_percent,
 	    verbose);
 
 	/* Valid range: 0 - <all physical memory> */
 	if ((zfs_arc_sys_free) && (zfs_arc_sys_free != arc_sys_free))
-		arc_sys_free = MIN(MAX(zfs_arc_sys_free, 0), allmem);
+		arc_sys_free = MIN(zfs_arc_sys_free, allmem);
 	WARN_IF_TUNING_IGNORED(zfs_arc_sys_free, arc_sys_free, verbose);
 }
 
@@ -8722,14 +8742,15 @@ top:
 				 * block pointer in the header.
 				 */
 				if (i == 0) {
-					bzero(l2dhdr, dev->l2ad_dev_hdr_asize);
+					memset(l2dhdr, 0,
+					    dev->l2ad_dev_hdr_asize);
 				} else {
-					bzero(&l2dhdr->dh_start_lbps[i],
+					memset(&l2dhdr->dh_start_lbps[i], 0,
 					    sizeof (l2arc_log_blkptr_t));
 				}
 				break;
 			}
-			bcopy(lb_ptr_buf->lb_ptr, &l2dhdr->dh_start_lbps[i],
+			memcpy(&l2dhdr->dh_start_lbps[i], lb_ptr_buf->lb_ptr,
 			    sizeof (l2arc_log_blkptr_t));
 			lb_ptr_buf = list_next(&dev->l2ad_lbptr_list,
 			    lb_ptr_buf);
@@ -9336,26 +9357,37 @@ l2arc_apply_transforms(spa_t *spa, arc_buf_hdr_t *hdr, uint64_t asize,
 	}
 
 	if (compress != ZIO_COMPRESS_OFF && !HDR_COMPRESSION_ENABLED(hdr)) {
-		cabd = abd_alloc_for_io(asize, ismd);
-		tmp = abd_borrow_buf(cabd, asize);
+		/*
+		 * In some cases, we can wind up with size > asize, so
+		 * we need to opt for the larger allocation option here.
+		 *
+		 * (We also need abd_return_buf_copy in all cases because
+		 * it's an ASSERT() to modify the buffer before returning it
+		 * with arc_return_buf(), and all the compressors
+		 * write things before deciding to fail compression in nearly
+		 * every case.)
+		 */
+		cabd = abd_alloc_for_io(size, ismd);
+		tmp = abd_borrow_buf(cabd, size);
 
 		psize = zio_compress_data(compress, to_write, tmp, size,
 		    hdr->b_complevel);
 
-		if (psize >= size) {
-			abd_return_buf(cabd, tmp, asize);
+		if (psize >= asize) {
+			psize = HDR_GET_PSIZE(hdr);
+			abd_return_buf_copy(cabd, tmp, size);
 			HDR_SET_COMPRESS(hdr, ZIO_COMPRESS_OFF);
 			to_write = cabd;
-			abd_copy(to_write, hdr->b_l1hdr.b_pabd, size);
-			if (size != asize)
-				abd_zero_off(to_write, size, asize - size);
+			abd_copy(to_write, hdr->b_l1hdr.b_pabd, psize);
+			if (psize != asize)
+				abd_zero_off(to_write, psize, asize - psize);
 			goto encrypt;
 		}
 		ASSERT3U(psize, <=, HDR_GET_PSIZE(hdr));
 		if (psize < asize)
-			bzero((char *)tmp + psize, asize - psize);
+			memset((char *)tmp + psize, 0, asize - psize);
 		psize = HDR_GET_PSIZE(hdr);
-		abd_return_buf_copy(cabd, tmp, asize);
+		abd_return_buf_copy(cabd, tmp, size);
 		to_write = cabd;
 	}
 
@@ -9388,7 +9420,7 @@ encrypt:
 			abd_zero_off(eabd, psize, asize - psize);
 
 		/* assert that the MAC we got here matches the one we saved */
-		ASSERT0(bcmp(mac, hdr->b_crypt_hdr.b_mac, ZIO_DATA_MAC_LEN));
+		ASSERT0(memcmp(mac, hdr->b_crypt_hdr.b_mac, ZIO_DATA_MAC_LEN));
 		spa_keystore_dsl_key_rele(spa, dck, FTAG);
 
 		if (to_write == cabd)
@@ -9706,7 +9738,7 @@ l2arc_hdr_limit_reached(void)
  * This thread feeds the L2ARC at regular intervals.  This is the beating
  * heart of the L2ARC.
  */
-static void
+static  __attribute__((noreturn)) void
 l2arc_feed_thread(void *unused)
 {
 	(void) unused;
@@ -9897,7 +9929,7 @@ l2arc_rebuild_dev(l2arc_dev_t *dev, boolean_t reopen)
 		if (l2arc_trim_ahead > 0) {
 			dev->l2ad_trim_all = B_TRUE;
 		} else {
-			bzero(l2dhdr, l2dhdr_asize);
+			memset(l2dhdr, 0, l2dhdr_asize);
 			l2arc_dev_hdr_update(dev);
 		}
 	}
@@ -10145,7 +10177,7 @@ l2arc_spa_rebuild_start(spa_t *spa)
 /*
  * Main entry point for L2ARC rebuilding.
  */
-static void
+static __attribute__((noreturn)) void
 l2arc_dev_rebuild_thread(void *arg)
 {
 	l2arc_dev_t *dev = arg;
@@ -10218,7 +10250,7 @@ l2arc_rebuild(l2arc_dev_t *dev)
 		goto out;
 
 	/* Prepare the rebuild process */
-	bcopy(l2dhdr->dh_start_lbps, lbps, sizeof (lbps));
+	memcpy(lbps, l2dhdr->dh_start_lbps, sizeof (lbps));
 
 	/* Start the rebuild process */
 	for (;;) {
@@ -10264,7 +10296,7 @@ l2arc_rebuild(l2arc_dev_t *dev)
 		lb_ptr_buf = kmem_zalloc(sizeof (l2arc_lb_ptr_buf_t), KM_SLEEP);
 		lb_ptr_buf->lb_ptr = kmem_zalloc(sizeof (l2arc_log_blkptr_t),
 		    KM_SLEEP);
-		bcopy(&lbps[0], lb_ptr_buf->lb_ptr,
+		memcpy(lb_ptr_buf->lb_ptr, &lbps[0],
 		    sizeof (l2arc_log_blkptr_t));
 		mutex_enter(&dev->l2ad_mtx);
 		list_insert_tail(&dev->l2ad_lbptr_list, lb_ptr_buf);
@@ -10302,7 +10334,7 @@ l2arc_rebuild(l2arc_dev_t *dev)
 		    !dev->l2ad_first)
 			goto out;
 
-		cond_resched();
+		kpreempt(KPREEMPT_SYNC);
 		for (;;) {
 			mutex_enter(&l2arc_rebuild_thr_lock);
 			if (dev->l2ad_rebuild_cancel) {
@@ -10362,7 +10394,7 @@ out:
 		 */
 		spa_history_log_internal(spa, "L2ARC rebuild", NULL,
 		    "no valid log blocks");
-		bzero(l2dhdr, dev->l2ad_dev_hdr_asize);
+		memset(l2dhdr, 0, dev->l2ad_dev_hdr_asize);
 		l2arc_dev_hdr_update(dev);
 	} else if (err == ECANCELED) {
 		/*
@@ -10853,13 +10885,13 @@ l2arc_log_blk_commit(l2arc_dev_t *dev, zio_t *pio, l2arc_write_callback_t *cb)
 	    ZIO_CHECKSUM_FLETCHER_4);
 	if (asize < sizeof (*lb)) {
 		/* compression succeeded */
-		bzero(tmpbuf + psize, asize - psize);
+		memset(tmpbuf + psize, 0, asize - psize);
 		L2BLK_SET_COMPRESS(
 		    (&l2dhdr->dh_start_lbps[0])->lbp_prop,
 		    ZIO_COMPRESS_LZ4);
 	} else {
 		/* compression failed */
-		bcopy(lb, tmpbuf, sizeof (*lb));
+		memcpy(tmpbuf, lb, sizeof (*lb));
 		L2BLK_SET_COMPRESS(
 		    (&l2dhdr->dh_start_lbps[0])->lbp_prop,
 		    ZIO_COMPRESS_OFF);
@@ -10885,7 +10917,7 @@ l2arc_log_blk_commit(l2arc_dev_t *dev, zio_t *pio, l2arc_write_callback_t *cb)
 	 * Include the committed log block's pointer  in the list of pointers
 	 * to log blocks present in the L2ARC device.
 	 */
-	bcopy(&l2dhdr->dh_start_lbps[0], lb_ptr_buf->lb_ptr,
+	memcpy(lb_ptr_buf->lb_ptr, &l2dhdr->dh_start_lbps[0],
 	    sizeof (l2arc_log_blkptr_t));
 	mutex_enter(&dev->l2ad_mtx);
 	list_insert_head(&dev->l2ad_lbptr_list, lb_ptr_buf);
@@ -10974,7 +11006,7 @@ l2arc_log_blk_insert(l2arc_dev_t *dev, const arc_buf_hdr_t *hdr)
 	ASSERT(HDR_HAS_L2HDR(hdr));
 
 	le = &lb->lb_entries[index];
-	bzero(le, sizeof (*le));
+	memset(le, 0, sizeof (*le));
 	le->le_dva = hdr->b_dva;
 	le->le_birth = hdr->b_birth;
 	le->le_daddr = hdr->b_l2hdr.b_daddr;
@@ -11043,58 +11075,57 @@ EXPORT_SYMBOL(arc_getbuf_func);
 EXPORT_SYMBOL(arc_add_prune_callback);
 EXPORT_SYMBOL(arc_remove_prune_callback);
 
-/* BEGIN CSTYLED */
 ZFS_MODULE_PARAM_CALL(zfs_arc, zfs_arc_, min, param_set_arc_min,
-	param_get_long, ZMOD_RW, "Min arc size");
+	param_get_ulong, ZMOD_RW, "Minimum ARC size in bytes");
 
 ZFS_MODULE_PARAM_CALL(zfs_arc, zfs_arc_, max, param_set_arc_max,
-	param_get_long, ZMOD_RW, "Max arc size");
+	param_get_ulong, ZMOD_RW, "Maximum ARC size in bytes");
 
 ZFS_MODULE_PARAM_CALL(zfs_arc, zfs_arc_, meta_limit, param_set_arc_long,
-	param_get_long, ZMOD_RW, "Metadata limit for arc size");
+	param_get_ulong, ZMOD_RW, "Metadata limit for ARC size in bytes");
 
 ZFS_MODULE_PARAM_CALL(zfs_arc, zfs_arc_, meta_limit_percent,
-	param_set_arc_long, param_get_long, ZMOD_RW,
-	"Percent of arc size for arc meta limit");
+    param_set_arc_long, param_get_ulong, ZMOD_RW,
+	"Percent of ARC size for ARC meta limit");
 
 ZFS_MODULE_PARAM_CALL(zfs_arc, zfs_arc_, meta_min, param_set_arc_long,
-	param_get_long, ZMOD_RW, "Min arc metadata");
+	param_get_ulong, ZMOD_RW, "Minimum ARC metadata size in bytes");
 
 ZFS_MODULE_PARAM(zfs_arc, zfs_arc_, meta_prune, INT, ZMOD_RW,
 	"Meta objects to scan for prune");
 
-ZFS_MODULE_PARAM(zfs_arc, zfs_arc_, meta_adjust_restarts, INT, ZMOD_RW,
+ZFS_MODULE_PARAM(zfs_arc, zfs_arc_, meta_adjust_restarts, UINT, ZMOD_RW,
 	"Limit number of restarts in arc_evict_meta");
 
-ZFS_MODULE_PARAM(zfs_arc, zfs_arc_, meta_strategy, INT, ZMOD_RW,
+ZFS_MODULE_PARAM(zfs_arc, zfs_arc_, meta_strategy, UINT, ZMOD_RW,
 	"Meta reclaim strategy");
 
 ZFS_MODULE_PARAM_CALL(zfs_arc, zfs_arc_, grow_retry, param_set_arc_int,
-	param_get_int, ZMOD_RW, "Seconds before growing arc size");
+	param_get_uint, ZMOD_RW, "Seconds before growing ARC size");
 
 ZFS_MODULE_PARAM(zfs_arc, zfs_arc_, p_dampener_disable, INT, ZMOD_RW,
 	"Disable arc_p adapt dampener");
 
 ZFS_MODULE_PARAM_CALL(zfs_arc, zfs_arc_, shrink_shift, param_set_arc_int,
-	param_get_int, ZMOD_RW, "log2(fraction of arc to reclaim)");
+	param_get_uint, ZMOD_RW, "log2(fraction of ARC to reclaim)");
 
 ZFS_MODULE_PARAM(zfs_arc, zfs_arc_, pc_percent, UINT, ZMOD_RW,
-	"Percent of pagecache to reclaim arc to");
+	"Percent of pagecache to reclaim ARC to");
 
 ZFS_MODULE_PARAM_CALL(zfs_arc, zfs_arc_, p_min_shift, param_set_arc_int,
-	param_get_int, ZMOD_RW, "arc_c shift to calc min/max arc_p");
+	param_get_uint, ZMOD_RW, "arc_c shift to calc min/max arc_p");
 
-ZFS_MODULE_PARAM(zfs_arc, zfs_arc_, average_blocksize, INT, ZMOD_RD,
+ZFS_MODULE_PARAM(zfs_arc, zfs_arc_, average_blocksize, UINT, ZMOD_RD,
 	"Target average block size");
 
 ZFS_MODULE_PARAM(zfs, zfs_, compressed_arc_enabled, INT, ZMOD_RW,
-	"Disable compressed arc buffers");
+	"Disable compressed ARC buffers");
 
 ZFS_MODULE_PARAM_CALL(zfs_arc, zfs_arc_, min_prefetch_ms, param_set_arc_int,
-	param_get_int, ZMOD_RW, "Min life of prefetch block in ms");
+	param_get_uint, ZMOD_RW, "Min life of prefetch block in ms");
 
 ZFS_MODULE_PARAM_CALL(zfs_arc, zfs_arc_, min_prescient_prefetch_ms,
-	param_set_arc_int, param_get_int, ZMOD_RW,
+    param_set_arc_int, param_get_uint, ZMOD_RW,
 	"Min life of prescient prefetched block in ms");
 
 ZFS_MODULE_PARAM(zfs_l2arc, l2arc_, write_max, ULONG, ZMOD_RW,
@@ -11127,7 +11158,7 @@ ZFS_MODULE_PARAM(zfs_l2arc, l2arc_, feed_again, INT, ZMOD_RW,
 ZFS_MODULE_PARAM(zfs_l2arc, l2arc_, norw, INT, ZMOD_RW,
 	"No reads during writes");
 
-ZFS_MODULE_PARAM(zfs_l2arc, l2arc_, meta_percent, INT, ZMOD_RW,
+ZFS_MODULE_PARAM(zfs_l2arc, l2arc_, meta_percent, UINT, ZMOD_RW,
 	"Percent of ARC size allowed for L2ARC-only headers");
 
 ZFS_MODULE_PARAM(zfs_l2arc, l2arc_, rebuild_enabled, INT, ZMOD_RW,
@@ -11140,31 +11171,29 @@ ZFS_MODULE_PARAM(zfs_l2arc, l2arc_, mfuonly, INT, ZMOD_RW,
 	"Cache only MFU data from ARC into L2ARC");
 
 ZFS_MODULE_PARAM(zfs_l2arc, l2arc_, exclude_special, INT, ZMOD_RW,
-	"If set to 1 exclude dbufs on special vdevs from being cached to "
-	"L2ARC.");
+	"Exclude dbufs on special vdevs from being cached to L2ARC if set.");
 
 ZFS_MODULE_PARAM_CALL(zfs_arc, zfs_arc_, lotsfree_percent, param_set_arc_int,
-	param_get_int, ZMOD_RW, "System free memory I/O throttle in bytes");
+	param_get_uint, ZMOD_RW, "System free memory I/O throttle in bytes");
 
 ZFS_MODULE_PARAM_CALL(zfs_arc, zfs_arc_, sys_free, param_set_arc_long,
-	param_get_long, ZMOD_RW, "System free memory target size in bytes");
+	param_get_ulong, ZMOD_RW, "System free memory target size in bytes");
 
 ZFS_MODULE_PARAM_CALL(zfs_arc, zfs_arc_, dnode_limit, param_set_arc_long,
-	param_get_long, ZMOD_RW, "Minimum bytes of dnodes in arc");
+	param_get_ulong, ZMOD_RW, "Minimum bytes of dnodes in ARC");
 
 ZFS_MODULE_PARAM_CALL(zfs_arc, zfs_arc_, dnode_limit_percent,
-	param_set_arc_long, param_get_long, ZMOD_RW,
+    param_set_arc_long, param_get_ulong, ZMOD_RW,
 	"Percent of ARC meta buffers for dnodes");
 
 ZFS_MODULE_PARAM(zfs_arc, zfs_arc_, dnode_reduce_percent, ULONG, ZMOD_RW,
 	"Percentage of excess dnodes to try to unpin");
 
-ZFS_MODULE_PARAM(zfs_arc, zfs_arc_, eviction_pct, INT, ZMOD_RW,
+ZFS_MODULE_PARAM(zfs_arc, zfs_arc_, eviction_pct, UINT, ZMOD_RW,
 	"When full, ARC allocation waits for eviction of this % of alloc size");
 
-ZFS_MODULE_PARAM(zfs_arc, zfs_arc_, evict_batch_limit, INT, ZMOD_RW,
+ZFS_MODULE_PARAM(zfs_arc, zfs_arc_, evict_batch_limit, UINT, ZMOD_RW,
 	"The number of headers to evict per sublist before moving to the next");
 
 ZFS_MODULE_PARAM(zfs_arc, zfs_arc_, prune_task_threads, INT, ZMOD_RW,
 	"Number of arc_prune threads");
-/* END CSTYLED */

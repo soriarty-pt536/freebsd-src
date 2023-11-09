@@ -6,7 +6,7 @@
  * You may not use this file except in compliance with the License.
  *
  * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
- * or http://www.opensolaris.org/os/licensing.
+ * or https://opensource.org/licenses/CDDL-1.0.
  * See the License for the specific language governing permissions
  * and limitations under the License.
  *
@@ -108,8 +108,7 @@ job_cleanup(void *arg)
 	tpool_active_t **activepp;
 
 	pthread_mutex_lock(&tpool->tp_mutex);
-	/* CSTYLED */
-	for (activepp = &tpool->tp_active;; activepp = &activep->tpa_next) {
+	for (activepp = &tpool->tp_active; ; activepp = &activep->tpa_next) {
 		activep = *activepp;
 		if (activep->tpa_tid == my_tid) {
 			*activepp = activep->tpa_next;

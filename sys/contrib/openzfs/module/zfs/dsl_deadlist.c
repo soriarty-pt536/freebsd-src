@@ -6,7 +6,7 @@
  * You may not use this file except in compliance with the License.
  *
  * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
- * or http://www.opensolaris.org/os/licensing.
+ * or https://opensource.org/licenses/CDDL-1.0.
  * See the License for the specific language governing permissions
  * and limitations under the License.
  *
@@ -855,7 +855,7 @@ dsl_deadlist_merge(dsl_deadlist_t *dl, uint64_t obj, dmu_tx_t *tx)
 	VERIFY0(dmu_bonus_hold(dl->dl_os, obj, FTAG, &bonus));
 	dlp = bonus->db_data;
 	dmu_buf_will_dirty(bonus, tx);
-	bzero(dlp, sizeof (*dlp));
+	memset(dlp, 0, sizeof (*dlp));
 	dmu_buf_rele(bonus, FTAG);
 	mutex_exit(&dl->dl_lock);
 }
@@ -1028,16 +1028,19 @@ dsl_process_sub_livelist(bpobj_t *bpobj, bplist_t *to_free, zthr_t *t,
 	    .t = t
 	};
 	int err = bpobj_iterate_nofree(bpobj, dsl_livelist_iterate, &arg, size);
+	VERIFY(err != 0 || avl_numnodes(&avl) == 0);
 
-	VERIFY0(avl_numnodes(&avl));
+	void *cookie = NULL;
+	livelist_entry_t *le = NULL;
+	while ((le = avl_destroy_nodes(&avl, &cookie)) != NULL) {
+		kmem_free(le, sizeof (livelist_entry_t));
+	}
 	avl_destroy(&avl);
 	return (err);
 }
 
-/* BEGIN CSTYLED */
 ZFS_MODULE_PARAM(zfs_livelist, zfs_livelist_, max_entries, ULONG, ZMOD_RW,
 	"Size to start the next sub-livelist in a livelist");
 
 ZFS_MODULE_PARAM(zfs_livelist, zfs_livelist_, min_percent_shared, INT, ZMOD_RW,
 	"Threshold at which livelist is disabled");
-/* END CSTYLED */

@@ -32,6 +32,7 @@ CONFS=	DAEMON \
 	gbde \
 	geli \
 	geli2 \
+	ggated \
 	gptboot \
 	growfs \
 	hostid \
@@ -110,6 +111,7 @@ CONFS=	DAEMON \
 	ugidfw \
 	${_utx} \
 	var \
+	var_run \
 	watchdogd
 
 .if ${MK_NIS} != "no"
@@ -325,6 +327,8 @@ ZFS+=		zfsbe
 ZFS+=		zfsd
 ZFS+=		zfskeys
 ZFS+=		zpool
+ZFS+=		zpoolreguid
+ZFS+=		zpoolupgrade
 ZFS+=		zvol
 ZFSPACKAGE=	rc
 .endif

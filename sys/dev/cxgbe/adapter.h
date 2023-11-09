@@ -41,6 +41,7 @@
 #include <sys/lock.h>
 #include <sys/malloc.h>
 #include <sys/rwlock.h>
+#include <sys/seqc.h>
 #include <sys/sx.h>
 #include <sys/vmem.h>
 #include <vm/uma.h>
@@ -108,11 +109,7 @@ enum {
 	CTRL_EQ_QSIZE = 1024,
 	TX_EQ_QSIZE = 1024,
 
-#if MJUMPAGESIZE != MCLBYTES
 	SW_ZONE_SIZES = 4,	/* cluster, jumbop, jumbo9k, jumbo16k */
-#else
-	SW_ZONE_SIZES = 3,	/* cluster, jumbo9k, jumbo16k */
-#endif
 	CL_METADATA_SIZE = CACHE_LINE_SIZE,
 
 	SGE_MAX_WR_NDESC = SGE_MAX_WR_LEN / EQ_ESIZE, /* max WR size in desc */
@@ -154,18 +151,21 @@ enum {
 };
 
 enum {
-	/* adapter flags */
+	/* adapter flags.  synch_op or adapter_lock. */
 	FULL_INIT_DONE	= (1 << 0),
 	FW_OK		= (1 << 1),
 	CHK_MBOX_ACCESS	= (1 << 2),
 	MASTER_PF	= (1 << 3),
-	/* 1 << 4 is unused, was ADAP_SYSCTL_CTX */
-	ADAP_ERR	= (1 << 5),
 	BUF_PACKING_OK	= (1 << 6),
 	IS_VF		= (1 << 7),
 	KERN_TLS_ON	= (1 << 8),	/* HW is configured for KERN_TLS */
 	CXGBE_BUSY	= (1 << 9),
-	HW_OFF_LIMITS	= (1 << 10),	/* off limits to all except reset_thread */
+
+	/* adapter error_flags.  reg_lock for HW_OFF_LIMITS, atomics for the rest. */
+	ADAP_STOPPED 	= (1 << 0),	/* Adapter has been stopped. */
+	ADAP_FATAL_ERR 	= (1 << 1),	/* Encountered a fatal error. */
+	HW_OFF_LIMITS 	= (1 << 2),	/* off limits to all except reset_thread */
+	ADAP_CIM_ERR 	= (1 << 3),	/* Error was related to FW/CIM. */
 
 	/* port flags */
 	HAS_TRACEQ	= (1 << 3),
@@ -251,6 +251,8 @@ struct vi_info {
 	struct sysctl_oid *ofld_txq_oid;
 
 	uint8_t hw_addr[ETHER_ADDR_LEN]; /* factory MAC address, won't change */
+	u_int txq_rr;
+	u_int rxq_rr;
 };
 
 struct tx_ch_rl_params {
@@ -371,6 +373,11 @@ struct iq_desc {
 CTASSERT(sizeof(struct iq_desc) == IQ_ESIZE);
 
 enum {
+	/* iq type */
+	IQ_OTHER	= FW_IQ_IQTYPE_OTHER,
+	IQ_ETH		= FW_IQ_IQTYPE_NIC,
+	IQ_OFLD		= FW_IQ_IQTYPE_OFLD,
+
 	/* iq flags */
 	IQ_SW_ALLOCATED	= (1 << 0),	/* sw resources allocated */
 	IQ_HAS_FL	= (1 << 1),	/* iq associated with a freelist */
@@ -414,14 +421,15 @@ typedef int (*fw_msg_handler_t)(struct adapter *, const __be64 *);
  * Ingress Queue: T4 is producer, driver is consumer.
  */
 struct sge_iq {
-	uint32_t flags;
+	uint16_t flags;
+	uint8_t qtype;
 	volatile int state;
 	struct adapter *adapter;
 	struct iq_desc  *desc;	/* KVA of descriptor ring */
 	int8_t   intr_pktc_idx;	/* packet count threshold index */
 	uint8_t  gen;		/* generation bit */
 	uint8_t  intr_params;	/* interrupt holdoff parameters */
-	int8_t   cong;		/* congestion settings */
+	int8_t   cong_drop;	/* congestion drop settings for the queue */
 	uint16_t qsize;		/* size (# of entries) of the queue */
 	uint16_t sidx;		/* index of the entry with the status page */
 	uint16_t cidx;		/* consumer index */
@@ -858,6 +866,15 @@ struct devnames {
 
 struct clip_entry;
 
+#define CNT_CAL_INFO 3
+struct clock_sync {
+	uint64_t hw_cur;
+	uint64_t hw_prev;
+	sbintime_t sbt_cur;
+	sbintime_t sbt_prev;
+	seqc_t gen;
+};
+
 struct adapter {
 	SLIST_ENTRY(adapter) link;
 	device_t dev;
@@ -906,7 +923,6 @@ struct adapter {
 	int nrawf;
 
 	struct taskqueue *tq[MAX_NCHAN];	/* General purpose taskqueues */
-	struct task async_event_task;
 	struct port_info *port[MAX_NPORTS];
 	uint8_t chan_map[MAX_NCHAN];		/* channel -> port */
 
@@ -937,6 +953,7 @@ struct adapter {
 	int active_ulds;	/* ULDs activated on this adapter */
 	int flags;
 	int debug_flags;
+	int error_flags;	/* Used by error handler and live reset. */
 
 	char ifp_lockname[16];
 	struct mtx ifp_lock;
@@ -977,6 +994,11 @@ struct adapter {
 	struct mtx sfl_lock;	/* same cache-line as sc_lock? but that's ok */
 	TAILQ_HEAD(, sge_fl) sfl;
 	struct callout sfl_callout;
+	struct callout cal_callout;
+	struct clock_sync cal_info[CNT_CAL_INFO];
+	int cal_current;
+	int cal_count;
+	uint32_t cal_gen;
 
 	/*
 	 * Driver code that can run when the adapter is suspended must use this
@@ -993,6 +1015,7 @@ struct adapter {
 	struct mtx tc_lock;
 	struct task tc_task;
 
+	struct task fatal_error_task;
 	struct task reset_task;
 	const void *reset_thread;
 	int num_resets;
@@ -1091,7 +1114,9 @@ forwarding_intr_to_fwq(struct adapter *sc)
 static inline bool
 hw_off_limits(struct adapter *sc)
 {
-	return (__predict_false(sc->flags & HW_OFF_LIMITS));
+	int off_limits = atomic_load_int(&sc->error_flags) & HW_OFF_LIMITS;
+
+	return (__predict_false(off_limits != 0));
 }
 
 static inline uint32_t
@@ -1288,12 +1313,11 @@ void free_atid(struct adapter *, int);
 void release_tid(struct adapter *, int, struct sge_wrq *);
 int cxgbe_media_change(struct ifnet *);
 void cxgbe_media_status(struct ifnet *, struct ifmediareq *);
-bool t4_os_dump_cimla(struct adapter *, int, bool);
-void t4_os_dump_devlog(struct adapter *);
+void t4_os_cim_err(struct adapter *);
 
 #ifdef KERN_TLS
-/* t4_kern_tls.c */
-int cxgbe_tls_tag_alloc(struct ifnet *, union if_snd_tag_alloc_params *,
+/* t6_kern_tls.c */
+int t6_tls_tag_alloc(struct ifnet *, union if_snd_tag_alloc_params *,
     struct m_snd_tag **);
 void t6_ktls_modload(void);
 void t6_ktls_modunload(void);
@@ -1375,7 +1399,7 @@ struct mbuf *alloc_wr_mbuf(int, int);
 int parse_pkt(struct mbuf **, bool);
 void *start_wrq_wr(struct sge_wrq *, int, struct wrq_cookie *);
 void commit_wrq_wr(struct sge_wrq *, void *, struct wrq_cookie *);
-int tnl_cong(struct port_info *, int);
+int t4_sge_set_conm_context(struct adapter *, int, int, int);
 void t4_register_an_handler(an_handler_t);
 void t4_register_fw_msg_handler(int, fw_msg_handler_t);
 void t4_register_cpl_handler(int, cpl_handler_t);

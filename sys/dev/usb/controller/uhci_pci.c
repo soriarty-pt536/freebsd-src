@@ -81,6 +81,7 @@ __FBSDID("$FreeBSD$");
 #define	PCI_UHCI_VENDORID_INTEL		0x8086
 #define	PCI_UHCI_VENDORID_HP		0x103c
 #define	PCI_UHCI_VENDORID_VIA		0x1106
+#define	PCI_UHCI_VENDORID_VMWARE	0x15ad
 
 /* PIIX4E has no separate stepping */
 
@@ -237,6 +238,8 @@ uhci_pci_match(device_t self)
 	case 0x30381106:
 		return ("VIA 83C572 USB controller");
 
+	case 0x077415ad:
+		return ("VMware USB controller");
 	default:
 		break;
 	}
@@ -326,6 +329,9 @@ uhci_pci_attach(device_t self)
 		break;
 	case PCI_UHCI_VENDORID_VIA:
 		sprintf(sc->sc_vendor, "VIA");
+		break;
+	case PCI_UHCI_VENDORID_VMWARE:
+		sprintf(sc->sc_vendor, "VMware");
 		break;
 	default:
 		if (bootverbose) {
@@ -456,7 +462,5 @@ static driver_t uhci_driver = {
 	.size = sizeof(struct uhci_softc),
 };
 
-static devclass_t uhci_devclass;
-
-DRIVER_MODULE(uhci, pci, uhci_driver, uhci_devclass, 0, 0);
+DRIVER_MODULE(uhci, pci, uhci_driver, 0, 0);
 MODULE_DEPEND(uhci, usb, 1, 1, 1);

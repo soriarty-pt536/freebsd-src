@@ -359,7 +359,7 @@ bhnd_nvram_sprom_getvar_direct(struct bhnd_nvram_io *io, const char *name,
 	if (error == ENOENT)
 		return (ENOENT);
 
-	/* Some other parse error occured */
+	/* Some other parse error occurred */
 	return (error);
 }
 
@@ -1281,7 +1281,7 @@ bhnd_nvram_sprom_getvar_common(struct bhnd_nvram_data *nv, void *cookiep,
 {
 	struct bhnd_nvram_sprom		*sp;
 	bhnd_sprom_opcode_idx_entry	*entry;
-	const struct bhnd_nvram_vardefn	*var;
+	const struct bhnd_nvram_vardefn	*var __diagused;
 
 	BHND_NV_ASSERT(cookiep != NULL, ("NULL variable cookiep"));
 

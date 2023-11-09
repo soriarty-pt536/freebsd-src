@@ -54,6 +54,9 @@ struct ipmi_request {
 	uint8_t		ir_addr;
 	uint8_t		ir_command;
 	uint8_t		ir_compcode;
+	bool		ir_ipmb;
+	uint8_t		ir_ipmb_addr;
+	uint8_t		ir_ipmb_command;
 };
 
 #define	MAX_RES				3
@@ -108,6 +111,7 @@ struct ipmi_softc {
 	uint8_t			ipmi_dev_support;	/* IPMI_ADS_* */
 	struct cdev		*ipmi_cdev;
 	TAILQ_HEAD(,ipmi_request) ipmi_pending_requests;
+	TAILQ_HEAD(,ipmi_request) ipmi_pending_requests_highpri;
 	int			ipmi_driver_requests_polled;
 	eventhandler_tag	ipmi_power_cycle_tag;
 	eventhandler_tag	ipmi_watchdog_tag;
@@ -127,10 +131,6 @@ struct ipmi_softc {
 
 #define	ipmi_ssif_smbus_address		_iface.ssif.smbus_address
 #define	ipmi_ssif_smbus			_iface.ssif.smbus
-
-struct ipmi_ipmb {
-	u_char foo;
-};
 
 #define KCS_MODE		0x01
 #define SMIC_MODE		0x02
@@ -230,12 +230,15 @@ int	ipmi_detach(device_t);
 void	ipmi_release_resources(device_t);
 
 /* Manage requests. */
+void ipmi_init_request(struct ipmi_request *, struct ipmi_device *, long,
+	    uint8_t, uint8_t, size_t, size_t);
 struct ipmi_request *ipmi_alloc_request(struct ipmi_device *, long, uint8_t,
 	    uint8_t, size_t, size_t);
 void	ipmi_complete_request(struct ipmi_softc *, struct ipmi_request *);
 struct ipmi_request *ipmi_dequeue_request(struct ipmi_softc *);
 void	ipmi_free_request(struct ipmi_request *);
 int	ipmi_polled_enqueue_request(struct ipmi_softc *, struct ipmi_request *);
+int	ipmi_polled_enqueue_request_highpri(struct ipmi_softc *, struct ipmi_request *);
 int	ipmi_submit_driver_request(struct ipmi_softc *, struct ipmi_request *,
 	    int);
 
@@ -251,11 +254,6 @@ int	ipmi_kcs_probe_align(struct ipmi_softc *);
 int	ipmi_smic_attach(struct ipmi_softc *);
 int	ipmi_ssif_attach(struct ipmi_softc *, device_t, int);
 
-#ifdef IPMB
-int	ipmi_handle_attn(struct ipmi_softc *);
-#endif
-
-extern devclass_t ipmi_devclass;
 extern int ipmi_attached;
 
 #endif	/* !__IPMIVARS_H__ */

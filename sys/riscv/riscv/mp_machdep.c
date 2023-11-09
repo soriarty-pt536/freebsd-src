@@ -71,7 +71,7 @@ __FBSDID("$FreeBSD$");
 #include <dev/ofw/ofw_cpu.h>
 #endif
 
-boolean_t ofw_cpu_reg(phandle_t node, u_int, cell_t *);
+#define	MP_BOOTSTACK_SIZE	(kstack_pages * PAGE_SIZE)
 
 uint32_t __riscv_boot_ap[MAXCPU];
 
@@ -125,14 +125,13 @@ static device_method_t riscv64_cpu_methods[] = {
 	DEVMETHOD_END
 };
 
-static devclass_t riscv64_cpu_devclass;
 static driver_t riscv64_cpu_driver = {
 	"riscv64_cpu",
 	riscv64_cpu_methods,
 	0
 };
 
-DRIVER_MODULE(riscv64_cpu, cpu, riscv64_cpu_driver, riscv64_cpu_devclass, 0, 0);
+DRIVER_MODULE(riscv64_cpu, cpu, riscv64_cpu_driver, 0, 0);
 
 static void
 riscv64_cpu_identify(driver_t *driver, device_t parent)
@@ -211,7 +210,7 @@ release_aps(void *dummy __unused)
 	sbi_send_ipi(mask.__bits);
 
 	for (i = 0; i < 2000; i++) {
-		if (smp_started)
+		if (atomic_load_acq_int(&smp_started))
 			return;
 		DELAY(1000);
 	}
@@ -285,11 +284,6 @@ init_secondary(uint64_t hart)
 
 	mtx_unlock_spin(&ap_boot_mtx);
 
-	/*
-	 * Assert that smp_after_idle_runnable condition is reasonable.
-	 */
-	MPASS(PCPU_GET(curpcb) == NULL);
-
 	/* Enter the scheduler */
 	sched_ap_entry();
 
@@ -300,16 +294,24 @@ init_secondary(uint64_t hart)
 static void
 smp_after_idle_runnable(void *arg __unused)
 {
-	struct pcpu *pc;
 	int cpu;
 
+	if (mp_ncpus == 1)
+		return;
+
+	KASSERT(smp_started != 0, ("%s: SMP not started yet", __func__));
+
+	/*
+	 * Wait for all APs to handle an interrupt.  After that, we know that
+	 * the APs have entered the scheduler at least once, so the boot stacks
+	 * are safe to free.
+	 */
+	smp_rendezvous(smp_no_rendezvous_barrier, NULL,
+	    smp_no_rendezvous_barrier, NULL);
+
 	for (cpu = 1; cpu <= mp_maxid; cpu++) {
-		if (bootstacks[cpu] != NULL) {
-			pc = pcpu_find(cpu);
-			while (atomic_load_ptr(&pc->pc_curpcb) == NULL)
-				cpu_spinwait();
-			kmem_free((vm_offset_t)bootstacks[cpu], PAGE_SIZE);
-		}
+		if (bootstacks[cpu] != NULL)
+			kmem_free(bootstacks[cpu], MP_BOOTSTACK_SIZE);
 	}
 }
 SYSINIT(smp_after_idle_runnable, SI_SUB_SMP, SI_ORDER_ANY,
@@ -402,6 +404,20 @@ cpu_mp_probe(void)
 
 #ifdef FDT
 static boolean_t
+cpu_check_mmu(u_int id __unused, phandle_t node, u_int addr_size __unused,
+    pcell_t *reg __unused)
+{
+	char type[32];
+
+	/* Check if this hart supports MMU. */
+	if (OF_getprop(node, "mmu-type", (void *)type, sizeof(type)) == -1 ||
+	    strncmp(type, "riscv,none", 10) == 0)
+		return (0);
+
+	return (1);
+}
+
+static boolean_t
 cpu_init_fdt(u_int id, phandle_t node, u_int addr_size, pcell_t *reg)
 {
 	struct pcpu *pcpup;
@@ -411,8 +427,7 @@ cpu_init_fdt(u_int id, phandle_t node, u_int addr_size, pcell_t *reg)
 	int naps;
 	int error;
 
-	/* Check if this hart supports MMU. */
-	if (OF_getproplen(node, "mmu-type") < 0)
+	if (!cpu_check_mmu(id, node, addr_size, reg))
 		return (0);
 
 	KASSERT(id < MAXCPU, ("Too many CPUs"));
@@ -470,13 +485,13 @@ cpu_init_fdt(u_int id, phandle_t node, u_int addr_size, pcell_t *reg)
 	pcpu_init(pcpup, cpuid, sizeof(struct pcpu));
 	pcpup->pc_hart = hart;
 
-	dpcpu[cpuid - 1] = (void *)kmem_malloc(DPCPU_SIZE, M_WAITOK | M_ZERO);
+	dpcpu[cpuid - 1] = kmem_malloc(DPCPU_SIZE, M_WAITOK | M_ZERO);
 	dpcpu_init(dpcpu[cpuid - 1], cpuid);
 
-	bootstacks[cpuid] = (void *)kmem_malloc(PAGE_SIZE, M_WAITOK | M_ZERO);
+	bootstacks[cpuid] = kmem_malloc(MP_BOOTSTACK_SIZE, M_WAITOK | M_ZERO);
 
 	naps = atomic_load_int(&aps_started);
-	bootstack = (char *)bootstacks[cpuid] + PAGE_SIZE;
+	bootstack = (char *)bootstacks[cpuid] + MP_BOOTSTACK_SIZE;
 
 	printf("Starting CPU %u (hart %lx)\n", cpuid, hart);
 	atomic_store_32(&__riscv_boot_ap[hart], 1);
@@ -517,17 +532,6 @@ cpu_mp_start(void)
 void
 cpu_mp_announce(void)
 {
-}
-
-static boolean_t
-cpu_check_mmu(u_int id, phandle_t node, u_int addr_size, pcell_t *reg)
-{
-
-	/* Check if this hart supports MMU. */
-	if (OF_getproplen(node, "mmu-type") < 0)
-		return (0);
-
-	return (1);
 }
 
 void

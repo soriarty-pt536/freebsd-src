@@ -67,7 +67,7 @@ SUBDIR=	\
 	${_bxe} \
 	${_bios} \
 	${_blake2} \
-	bnxt \
+	${_bnxt} \
 	bridgestp \
 	bwi \
 	bwn \
@@ -99,6 +99,7 @@ SUBDIR=	\
 	dc \
 	dcons \
 	dcons_crom \
+	${_dpaa2} \
 	${_dpdk_lpm4} \
 	${_dpdk_lpm6} \
 	${_dpms} \
@@ -145,8 +146,10 @@ SUBDIR=	\
 	${_ichwd} \
 	${_ice} \
 	${_ice_ddp} \
+	${_irdma} \
 	${_ida} \
 	if_bridge \
+	${_if_cgem} \
 	if_disc \
 	if_edsc \
 	${_if_enc} \
@@ -156,10 +159,12 @@ SUBDIR=	\
 	${_if_me} \
 	if_infiniband \
 	if_lagg \
+	if_ovpn \
 	${_if_stf} \
 	if_tuntap \
 	if_vlan \
 	if_vxlan \
+	${_if_wg} \
 	iflib \
 	${_igc} \
 	imgact_binmisc \
@@ -167,7 +172,7 @@ SUBDIR=	\
 	${_io} \
 	${_ioat} \
         ${_ipoib} \
-	${_ipdivert} \
+	ipdivert \
 	${_ipfilter} \
 	${_ipfw} \
 	ipfw_nat \
@@ -214,19 +219,21 @@ SUBDIR=	\
 	linuxkpi_wlan \
 	${_lio} \
 	lpt \
-	mac_biba \
-	mac_bsdextended \
-	mac_ifoff \
-	mac_lomac \
-	mac_mls \
-	mac_none \
-	mac_ntpd \
-	mac_partition \
-	mac_portacl \
-	mac_priority \
-	mac_seeotheruids \
-	mac_stub \
-	mac_test \
+	${_mac_biba} \
+	${_mac_bsdextended} \
+	${_mac_ddb} \
+	${_mac_ifoff} \
+	${_mac_lomac} \
+	${_mac_mls} \
+	${_mac_none} \
+	${_mac_ntpd} \
+	${_mac_partition} \
+	${_mac_pimd} \
+	${_mac_portacl} \
+	${_mac_priority} \
+	${_mac_seeotheruids} \
+	${_mac_stub} \
+	${_mac_test} \
 	${_malo} \
 	${_mana} \
 	md \
@@ -261,6 +268,7 @@ SUBDIR=	\
 	my \
 	${_nctgpio} \
 	${_neta} \
+	netlink \
 	${_netgraph} \
 	${_nfe} \
 	nfscl \
@@ -304,6 +312,8 @@ SUBDIR=	\
 	pwm \
 	${_qat} \
 	${_qatfw} \
+	${_qat_c2xxx} \
+	${_qat_c2xxxfw} \
 	${_qlxge} \
 	${_qlxgb} \
 	${_qlxgbe} \
@@ -319,6 +329,8 @@ SUBDIR=	\
 	rl \
 	${_rockchip} \
 	rtsx \
+	${_rtw88} \
+	${_rtw88fw} \
 	rtwn \
 	rtwn_pci \
 	rtwn_usb \
@@ -405,13 +417,16 @@ SUBDIR=	\
 _autofs=	autofs
 .endif
 
-.if ${MK_CDDL} != "no" || defined(ALL_MODULES)
-.if ${MACHINE_CPUARCH} != "arm" || ${MACHINE_ARCH:Marmv[67]*} != ""
+.if ${MK_DTRACE} != "no" || defined(ALL_MODULES)
 .if ${KERN_OPTS:MKDTRACE_HOOKS}
 SUBDIR+=	dtrace
 .endif
-.endif
 SUBDIR+=	opensolaris
+.endif
+
+# Requires bus_space_read_8
+.if ${MACHINE_ARCH} != "i386"
+_bnxt=		bnxt
 .endif
 
 .if ${MK_CRYPT} != "no" || defined(ALL_MODULES)
@@ -440,6 +455,9 @@ _toecore=	toecore
 _if_enc=	if_enc
 _if_gif=	if_gif
 _if_gre=	if_gre
+.if ${MK_CRYPT} != "no" || defined(ALL_MODULES)
+_if_wg=		if_wg
+.endif
 _ipfw_pmod=	ipfw_pmod
 .if ${KERN_OPTS:MIPSEC_SUPPORT} && !${KERN_OPTS:MIPSEC}
 _ipsec=		ipsec
@@ -456,7 +474,6 @@ _if_stf=	if_stf
 
 .if ${MK_INET_SUPPORT} != "no" || defined(ALL_MODULES)
 _if_me=		if_me
-_ipdivert=	ipdivert
 _ipfw=		ipfw
 .if ${MK_INET6_SUPPORT} != "no" || defined(ALL_MODULES)
 _ipfw_nat64=	ipfw_nat64
@@ -529,7 +546,32 @@ _mlx4ib=	mlx4ib
 _mlx5ib=	mlx5ib
 .endif
 _ossl=		ossl
+_rtw88=		rtw88
+.if ${MK_SOURCELESS_UCODE} != "no"
+_rtw88fw=	rtw88fw
+.endif
 _vmware=	vmware
+.endif
+
+# MAC framework
+.if ${KERN_OPTS:MMAC} || defined(ALL_MODULES)
+_mac_biba=	mac_biba
+_mac_bsdextended= mac_bsdextended
+.if ${KERN_OPTS:MDDB} || defined(ALL_MODULES)
+_mac_ddb=	mac_ddb
+.endif
+_mac_ifoff=	mac_ifoff
+_mac_lomac=	mac_lomac
+_mac_mls=	mac_mls
+_mac_none=	mac_none
+_mac_ntpd=	mac_ntpd
+_mac_partition=	mac_partition
+_mac_pimd=	mac_pimd
+_mac_portacl=	mac_portacl
+_mac_priority=	mac_priority
+_mac_seeotheruids= mac_seeotheruids
+_mac_stub=	mac_stub
+_mac_test=	mac_test
 .endif
 
 .if ${MK_NETGRAPH} != "no" || defined(ALL_MODULES)
@@ -567,6 +609,18 @@ _ice=		ice
 .if ${MK_SOURCELESS_UCODE} != "no"
 _ice_ddp=	ice_ddp
 .endif
+.if ${MK_OFED} != "no" || defined(ALL_MODULES)
+.if ${MK_INET_SUPPORT} != "no" && ${MK_INET6_SUPPORT} != "no"
+_irdma=		irdma
+.endif
+.endif
+.endif
+
+.if ${MACHINE_CPUARCH} == "aarch64" || ${MACHINE_CPUARCH} == "arm" || \
+	${MACHINE_CPUARCH} == "riscv"
+.if !empty(OPT_FDT)
+_if_cgem=	if_cgem
+.endif
 .endif
 
 # These rely on 64bit atomics
@@ -583,27 +637,29 @@ SUBDIR+=	tests
 SUBDIR+=	zfs
 .endif
 
-.if ${MACHINE_CPUARCH} != "aarch64" && ${MACHINE_CPUARCH} != "arm" && \
-	${MACHINE_CPUARCH} != "powerpc" && ${MACHINE_CPUARCH} != "riscv"
-_syscons=	syscons
-.endif
-
 .if ${MK_SOURCELESS_UCODE} != "no"
 _cxgb=		cxgb
 .endif
 
 .if ${MACHINE_CPUARCH} == "aarch64"
-_allwinner=	allwinner
 _armv8crypto=	armv8crypto
-_dwwdt=		dwwdt
+_dpaa2=		dpaa2
 _em=		em
+_hyperv=  hyperv
+
+.if !empty(OPT_FDT)
+_allwinner=	allwinner
+_dwwdt=		dwwdt
 _enetc=		enetc
 _felix=		felix
 _rockchip=	rockchip
 .endif
+.endif
 
 .if ${MACHINE_CPUARCH} == "aarch64" || ${MACHINE_CPUARCH} == "arm"
+.if !empty(OPT_FDT)
 _sdhci_fdt=	sdhci_fdt
+.endif
 _e6000sw=	e6000sw
 _neta=		neta
 .endif
@@ -639,15 +695,18 @@ _mgb=		mgb
 _nctgpio=	nctgpio
 _ntb=		ntb
 _ocs_fc=	ocs_fc
+_p2sb=		p2sb
 _qat=		qat
 _qatfw=		qatfw
+_qat_c2xxx=	qat_c2xxx
+_qat_c2xxxfw=	qat_c2xxxfw
 .if ${MK_OFED} != "no" || defined(ALL_MODULES)
 _rdma=		rdma
 .endif
 _safe=		safe
 _speaker=	speaker
 _splash=	splash
-_p2sb=		p2sb
+_syscons=	syscons
 _wbwd=		wbwd
 
 _aac=		aac
@@ -794,9 +853,7 @@ _nvram=		opal_nvram
 _nvram+=	powermac_nvram
 .endif
 
-.endif
-
-.if ${MACHINE_ARCH:Marmv[67]*} != "" || ${MACHINE_CPUARCH} == "aarch64"
+.if ${MACHINE_CPUARCH} == "arm" || ${MACHINE_CPUARCH} == "aarch64"
 _bcm283x_clkman=  bcm283x_clkman
 _bcm283x_pwm=  bcm283x_pwm
 .endif
@@ -812,6 +869,8 @@ SUBDIR+=${MODULES_EXTRA}
 .for reject in ${WITHOUT_MODULES}
 SUBDIR:= ${SUBDIR:N${reject}}
 .endfor
+
+.endif # MODULES_OVERRIDE -- Keep last
 
 # Calling kldxref(8) for each module is expensive.
 .if !defined(NO_XREF)

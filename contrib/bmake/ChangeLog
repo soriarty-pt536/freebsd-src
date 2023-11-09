@@ -1,3 +1,94 @@
+2022-07-26  Simon J Gerraty  <sjg@beast.crufty.net>
+
+	* VERSION (_MAKE_VERSION): 20220726
+
+	* Auto-create objdir for bmake/unit-tests if appropriate
+
+2022-07-24  Simon J Gerraty  <sjg@beast.crufty.net>
+
+	* VERSION (_MAKE_VERSION): 20220724
+	Merge with NetBSD make, pick up
+	o make.1: describe variable assignment and evaluation more precisely
+	o parse.c: fix out-of-bounds read when parsing an invalid line
+	o var.c: simplify return type of IsShortVarnameValid
+
+2022-06-12  Simon J Gerraty  <sjg@beast.crufty.net>
+
+	* VERSION (_MAKE_VERSION): 20220612
+	Merge with NetBSD make, pick up
+	o allow to randomize build order of targets
+	.MAKE.MODE += randomize-targets can help uncover dependency bugs
+	within a makefile.
+	o compat.c: rename Compat_Run to Compat_MakeAll
+	o make.c: inline MakeBuildParent
+	inline make_abort, improve error details
+	o parse.c: reorganize Parse_Error
+	fix memory leak in wildcard targets and sources
+	separate cases in HandleDependencyTargetMundane
+	extract HandleSingleDependencyTargetMundane
+	rename loadfile to LoadFile
+	split IncludeFile into separate functions
+	condense code for searching a file in the paths
+	fix off-by-one error in buffer for .WAIT nodes
+	o str.c: condense Str_Match
+	make code for string matching syntactically more consistent
+
+2022-04-18  Simon J Gerraty  <sjg@beast.crufty.net>
+
+	* VERSION (_MAKE_VERSION): 20220418
+	Merge with NetBSD make, pick up
+	o ignore '.POSIX:' if not in first non-comment line
+	of Makefile as specified by POSIX.
+	add unit-tests for above.
+	o meta.c: make it easier to find usage of identifiers
+	o targ.c: add .USEBEFORE to Targ_PrintType
+
+2022-04-14  Simon J Gerraty  <sjg@beast.crufty.net>
+
+	* VERSION (_MAKE_VERSION): 20220414
+
+	* unit-tests/Makefile: simplify checks for shells with
+	BROKEN_TESTS, this helps with other Linux distros that
+	use dash.
+
+2022-03-30  Simon J Gerraty  <sjg@beast.crufty.net>
+
+	* VERSION (_MAKE_VERSION): 20220330
+	Merge with NetBSD make, pick up
+	o var.c: fix spacing, and a typo in a test
+
+2022-03-26  Simon J Gerraty  <sjg@beast.crufty.net>
+
+	* VERSION (_MAKE_VERSION): 20220326
+	Merge with NetBSD make, pick up
+	o parse.c: try to include 'posix.mk' the first time
+	.POSIX: is encountered, to allow for beter POSIX compliance.
+	o var.c: make debug logs more readable
+	prefer 'long long' over 'long' on 32-bit C99 platforms
+	fix crash on .undef of an environment variable
+
+2022-03-03  Simon J Gerraty  <sjg@beast.crufty.net>
+
+	* VERSION (_MAKE_VERSION): 20220303
+	Merge with NetBSD make, pick up
+	o tell meta mode unit tests not to expect filemon
+	o cond.c: make debug logging for comparisons less technical
+	o lst.c: fix mem leak in Lst_Remove
+	o str.c: make code for string matching syntactically more consistent
+	o var.c: simplify ParseModifier_Match
+
+2022-02-14  Simon J Gerraty  <sjg@beast.crufty.net>
+
+	* unit-tests/Makefile: control MAKESYSPATH for deptgt-phony
+
+	* VERSION (_MAKE_VERSION): 20220214
+	Merge with NetBSD make, pick up
+	o cond.c: simplify control flow in CondParser_Comparison
+	o job.c: fix echoing of command with '-' in silent target in jobs mode
+	o main.c: prefix the warning about read-only .OBJDIR with a colon
+	o parse.c: remove redundant conditions
+	o var.c: simplify control flow in ModifyWord_SysVSubst
+
 2022-02-08  Simon J Gerraty  <sjg@beast.crufty.net>
 
 	* unit-tests/Makefile: disable opt-debug-x-trace on Linux if there

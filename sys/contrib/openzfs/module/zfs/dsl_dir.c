@@ -6,7 +6,7 @@
  * You may not use this file except in compliance with the License.
  *
  * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
- * or http://www.opensolaris.org/os/licensing.
+ * or https://opensource.org/licenses/CDDL-1.0.
  * See the License for the specific language governing permissions
  * and limitations under the License.
  *
@@ -121,8 +121,6 @@
  * dsl_dir_init_fs_ss_count().
  */
 
-extern inline dsl_dir_phys_t *dsl_dir_phys(dsl_dir_t *dd);
-
 static uint64_t dsl_dir_space_towrite(dsl_dir_t *dd);
 
 typedef struct ddulrt_arg {
@@ -162,7 +160,7 @@ dsl_dir_evict_async(void *dbu)
 
 int
 dsl_dir_hold_obj(dsl_pool_t *dp, uint64_t ddobj,
-    const char *tail, void *tag, dsl_dir_t **ddp)
+    const char *tail, const void *tag, dsl_dir_t **ddp)
 {
 	dmu_buf_t *dbuf;
 	dsl_dir_t *dd;
@@ -208,8 +206,6 @@ dsl_dir_hold_obj(dsl_pool_t *dp, uint64_t ddobj,
 				goto errout;
 			}
 		}
-
-		dsl_dir_snap_cmtime_update(dd);
 
 		if (dsl_dir_phys(dd)->dd_parent_obj) {
 			err = dsl_dir_hold_obj(dp,
@@ -272,6 +268,16 @@ dsl_dir_hold_obj(dsl_pool_t *dp, uint64_t ddobj,
 			}
 		}
 
+		if (dsl_dir_is_zapified(dd)) {
+			inode_timespec_t t = {0};
+			(void) zap_lookup(dp->dp_meta_objset, ddobj,
+			    DD_FIELD_SNAPSHOTS_CHANGED,
+			    sizeof (uint64_t),
+			    sizeof (inode_timespec_t) / sizeof (uint64_t),
+			    &t);
+			dd->dd_snap_cmtime = t;
+		}
+
 		dmu_buf_init_user(&dd->dd_dbu, NULL, dsl_dir_evict_async,
 		    &dd->dd_dbuf);
 		winner = dmu_buf_set_user_ie(dbuf, &dd->dd_dbu);
@@ -322,7 +328,7 @@ errout:
 }
 
 void
-dsl_dir_rele(dsl_dir_t *dd, void *tag)
+dsl_dir_rele(dsl_dir_t *dd, const void *tag)
 {
 	dprintf_dd(dd, "%s\n", "");
 	spa_close(dd->dd_pool->dp_spa, tag);
@@ -337,7 +343,7 @@ dsl_dir_rele(dsl_dir_t *dd, void *tag)
  * the spa.
  */
 void
-dsl_dir_async_rele(dsl_dir_t *dd, void *tag)
+dsl_dir_async_rele(dsl_dir_t *dd, const void *tag)
 {
 	dprintf_dd(dd, "%s\n", "");
 	spa_async_close(dd->dd_pool->dp_spa, tag);
@@ -422,8 +428,7 @@ getcomponent(const char *path, char *component, const char **nextp)
 	} else if (p[0] == '/') {
 		if (p - path >= ZFS_MAX_DATASET_NAME_LEN)
 			return (SET_ERROR(ENAMETOOLONG));
-		(void) strncpy(component, path, p - path);
-		component[p - path] = '\0';
+		(void) strlcpy(component, path, p - path + 1);
 		p++;
 	} else if (p[0] == '@') {
 		/*
@@ -434,8 +439,7 @@ getcomponent(const char *path, char *component, const char **nextp)
 			return (SET_ERROR(EINVAL));
 		if (p - path >= ZFS_MAX_DATASET_NAME_LEN)
 			return (SET_ERROR(ENAMETOOLONG));
-		(void) strncpy(component, path, p - path);
-		component[p - path] = '\0';
+		(void) strlcpy(component, path, p - path + 1);
 	} else {
 		panic("invalid p=%p", (void *)p);
 	}
@@ -451,7 +455,7 @@ getcomponent(const char *path, char *component, const char **nextp)
  * (*tail)[0] == '@' means that the last component is a snapshot.
  */
 int
-dsl_dir_hold(dsl_pool_t *dp, const char *name, void *tag,
+dsl_dir_hold(dsl_pool_t *dp, const char *name, const void *tag,
     dsl_dir_t **ddp, const char **tailp)
 {
 	char *buf;
@@ -803,7 +807,7 @@ dsl_fs_ss_limit_check(dsl_dir_t *dd, uint64_t delta, zfs_prop_t prop,
 {
 	objset_t *os = dd->dd_pool->dp_meta_objset;
 	uint64_t limit, count;
-	char *count_prop;
+	const char *count_prop;
 	enforce_res_t enforce;
 	int err = 0;
 
@@ -1322,7 +1326,6 @@ top_of_function:
 	 * we're very close to full, this will allow a steady trickle of
 	 * removes to get through.
 	 */
-	uint64_t deferred = 0;
 	if (dd->dd_parent == NULL) {
 		uint64_t avail = dsl_pool_unreserved_space(dd->dd_pool,
 		    (netfree) ?
@@ -1337,13 +1340,21 @@ top_of_function:
 	/*
 	 * If they are requesting more space, and our current estimate
 	 * is over quota, they get to try again unless the actual
-	 * on-disk is over quota and there are no pending changes (which
-	 * may free up space for us).
+	 * on-disk is over quota and there are no pending changes
+	 * or deferred frees (which may free up space for us).
 	 */
 	if (used_on_disk + est_inflight >= quota) {
-		if (est_inflight > 0 || used_on_disk < quota ||
-		    (retval == ENOSPC && used_on_disk < quota + deferred))
-			retval = ERESTART;
+		if (est_inflight > 0 || used_on_disk < quota) {
+			retval = SET_ERROR(ERESTART);
+		} else {
+			ASSERT3U(used_on_disk, >=, quota);
+
+			if (retval == ENOSPC && (used_on_disk - quota) <
+			    dsl_pool_deferred_space(dd->dd_pool)) {
+				retval = SET_ERROR(ERESTART);
+			}
+		}
+
 		dprintf_dd(dd, "failing: used=%lluK inflight = %lluK "
 		    "quota=%lluK tr=%lluK err=%d\n",
 		    (u_longlong_t)used_on_disk>>10,
@@ -1351,7 +1362,7 @@ top_of_function:
 		    (u_longlong_t)quota>>10, (u_longlong_t)asize>>10, retval);
 		mutex_exit(&dd->dd_lock);
 		DMU_TX_STAT_BUMP(dmu_tx_quota);
-		return (SET_ERROR(retval));
+		return (retval);
 	}
 
 	/* We need to up our estimated delta before dropping dd_lock */
@@ -2238,13 +2249,25 @@ dsl_dir_snap_cmtime(dsl_dir_t *dd)
 }
 
 void
-dsl_dir_snap_cmtime_update(dsl_dir_t *dd)
+dsl_dir_snap_cmtime_update(dsl_dir_t *dd, dmu_tx_t *tx)
 {
+	dsl_pool_t *dp = dmu_tx_pool(tx);
 	inode_timespec_t t;
-
 	gethrestime(&t);
+
 	mutex_enter(&dd->dd_lock);
 	dd->dd_snap_cmtime = t;
+	if (spa_feature_is_enabled(dp->dp_spa,
+	    SPA_FEATURE_EXTENSIBLE_DATASET)) {
+		objset_t *mos = dd->dd_pool->dp_meta_objset;
+		uint64_t ddobj = dd->dd_object;
+		dsl_dir_zapify(dd, tx);
+		VERIFY0(zap_update(mos, ddobj,
+		    DD_FIELD_SNAPSHOTS_CHANGED,
+		    sizeof (uint64_t),
+		    sizeof (inode_timespec_t) / sizeof (uint64_t),
+		    &t, tx));
+	}
 	mutex_exit(&dd->dd_lock);
 }
 

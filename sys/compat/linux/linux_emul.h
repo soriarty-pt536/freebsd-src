@@ -75,6 +75,9 @@ struct linux_pemuldata {
 	struct sx	pem_sx;		/* lock for this struct */
 	uint32_t	persona;	/* process execution domain */
 	uint32_t	ptrace_flags;	/* used by ptrace(2) */
+	uint32_t	oom_score_adj;	/* /proc/self/oom_score_adj */
+	uint32_t	so_timestamp;	/* requested timeval */
+	uint32_t	so_timestampns;	/* requested timespec */
 };
 
 #define	LINUX_PEM_XLOCK(p)	sx_xlock(&(p)->pem_sx)

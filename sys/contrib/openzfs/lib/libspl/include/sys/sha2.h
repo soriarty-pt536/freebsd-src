@@ -6,7 +6,7 @@
  * You may not use this file except in compliance with the License.
  *
  * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
- * or http://www.opensolaris.org/os/licensing.
+ * or https://opensource.org/licenses/CDDL-1.0.
  * See the License for the specific language governing permissions
  * and limitations under the License.
  *
@@ -32,9 +32,6 @@
 #ifdef	__cplusplus
 extern "C" {
 #endif
-
-#define	SHA2_HMAC_MIN_KEY_LEN	1	/* SHA2-HMAC min key length in bytes */
-#define	SHA2_HMAC_MAX_KEY_LEN	INT_MAX	/* SHA2-HMAC max key length in bytes */
 
 #define	SHA256_DIGEST_LENGTH	32	/* SHA256 digest length in bytes */
 #define	SHA384_DIGEST_LENGTH	48	/* SHA384 digest length in bytes */

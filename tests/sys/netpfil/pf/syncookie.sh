@@ -29,6 +29,14 @@
 
 common_dir=$(atf_get_srcdir)/../common
 
+syncookie_state()
+{
+	jail=$1
+
+	jexec $jail pfctl -si -v | grep -A 2 '^Syncookies' | grep active \
+	    | awk '{ print($2); }'
+}
+
 atf_test_case "basic" "cleanup"
 basic_head()
 {
@@ -62,6 +70,14 @@ basic_body()
 	if [ "${reply}" != "foo" ];
 	then
 		atf_fail "Failed to connect to syncookie protected echo daemon"
+	fi
+
+
+	# Check that status shows syncookies as being active
+	active=$(syncookie_state alcatraz)
+	if [ "$active" != "active" ];
+	then
+		atf_fail "syncookies not active"
 	fi
 }
 
@@ -196,11 +212,25 @@ adaptive_body()
 	# Sanity check
 	atf_check -s exit:0 -o ignore ping -c 1 192.0.2.1
 
+	# Check that status shows syncookies as being inactive
+	active=$(syncookie_state alcatraz)
+	if [ "$active" != "inactive" ];
+	then
+		atf_fail "syncookies active when they should not be"
+	fi
+
 	# Now syn flood to create many states
 	${common_dir}/pft_synflood.py \
 		--sendif ${epair}a \
 		--to 192.0.2.2 \
 		--count 100
+
+	# Check that status shows syncookies as being active
+	active=$(syncookie_state alcatraz)
+	if [ "$active" != "active" ];
+	then
+		atf_fail "syncookies not active"
+	fi
 
 	# Adaptive mode should kick in and stop us from creating more than
 	# about 10 states
@@ -217,10 +247,43 @@ adaptive_cleanup()
 	pft_cleanup
 }
 
+atf_test_case "limits" "cleanup"
+limits_head()
+{
+	atf_set descr 'Ensure limit calculation works for low or high state limits'
+	atf_set require.user root
+}
+
+limits_body()
+{
+	pft_init
+
+	vnet_mkjail alcatraz
+
+	jexec alcatraz pfctl -e
+	pft_set_rules alcatraz \
+		"set limit states 1" \
+		"set syncookies adaptive (start 10%%, end 5%%)" \
+		"pass in" \
+		"pass out"
+
+	pft_set_rules alcatraz \
+		"set limit states 326000000" \
+		"set syncookies adaptive (start 10%%, end 5%%)" \
+		"pass in" \
+		"pass out"
+}
+
+limits_cleanup()
+{
+	pft_cleanup
+}
+
 atf_init_test_cases()
 {
 	atf_add_test_case "basic"
 	atf_add_test_case "forward"
 	atf_add_test_case "nostate"
 	atf_add_test_case "adaptive"
+	atf_add_test_case "limits"
 }

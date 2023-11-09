@@ -891,11 +891,9 @@ mlx5_firmware_update(struct mlx5_core_dev *dev)
 static int mlx5_pci_init(struct mlx5_core_dev *dev, struct mlx5_priv *priv)
 {
 	struct pci_dev *pdev = dev->pdev;
-	device_t bsddev;
 	int err;
 
 	pdev = dev->pdev;
-	bsddev = pdev->dev.bsddev;
 	pci_set_drvdata(dev->pdev, dev);
 	strncpy(priv->name, dev_name(&pdev->dev), MLX5_MAX_NAME_LEN);
 	priv->name[MLX5_MAX_NAME_LEN - 1] = 0;
@@ -2030,9 +2028,9 @@ static const struct pci_device_id mlx5_core_pci_table[] = {
 	{ PCI_VDEVICE(MELLANOX, 4126) }, /* ConnectX Family mlx5Gen Virtual Function */
 	{ PCI_VDEVICE(MELLANOX, 4127) }, /* ConnectX-6 LX */
 	{ PCI_VDEVICE(MELLANOX, 4128) },
-	{ PCI_VDEVICE(MELLANOX, 4129) },
+	{ PCI_VDEVICE(MELLANOX, 4129) }, /* ConnectX-7 */
 	{ PCI_VDEVICE(MELLANOX, 4130) },
-	{ PCI_VDEVICE(MELLANOX, 4131) },
+	{ PCI_VDEVICE(MELLANOX, 4131) }, /* ConnectX-8 */
 	{ PCI_VDEVICE(MELLANOX, 4132) },
 	{ PCI_VDEVICE(MELLANOX, 4133) },
 	{ PCI_VDEVICE(MELLANOX, 4134) },
@@ -2049,6 +2047,8 @@ static const struct pci_device_id mlx5_core_pci_table[] = {
 	{ PCI_VDEVICE(MELLANOX, 0xa2d2) }, /* BlueField integrated ConnectX-5 network controller */
 	{ PCI_VDEVICE(MELLANOX, 0xa2d3) }, /* BlueField integrated ConnectX-5 network controller VF */
 	{ PCI_VDEVICE(MELLANOX, 0xa2d6) }, /* BlueField-2 integrated ConnectX-6 Dx network controller */
+	{ PCI_VDEVICE(MELLANOX, 0xa2dc) }, /* BlueField-3 integrated ConnectX-7 network controller */
+	{ PCI_VDEVICE(MELLANOX, 0xa2df) }, /* BlueField-4 integrated ConnectX-8 network controller */
 	{ }
 };
 

@@ -36,6 +36,7 @@
 #ifndef _NETINET_UDP_VAR_H_
 #define	_NETINET_UDP_VAR_H_
 
+#include <sys/types.h>
 #include <netinet/ip_var.h>
 #include <netinet/udp.h>
 
@@ -60,16 +61,21 @@ struct udpiphdr {
 struct inpcb;
 struct mbuf;
 
-typedef void(*udp_tun_func_t)(struct mbuf *, int, struct inpcb *,
-			      const struct sockaddr *, void *);
-typedef void(*udp_tun_icmp_t)(int, struct sockaddr *, void *, void *);
+#ifdef _KERNEL
+typedef bool	udp_tun_func_t(struct mbuf *, int, struct inpcb *,
+		    const struct sockaddr *, void *);
+typedef union {
+	struct icmp *icmp;
+	struct ip6ctlparam *ip6cp;
+} udp_tun_icmp_param_t __attribute__((__transparent_union__));
+typedef void	udp_tun_icmp_t(udp_tun_icmp_param_t);
 
 /*
  * UDP control block; one per udp.
  */
 struct udpcb {
-	udp_tun_func_t	u_tun_func;	/* UDP kernel tunneling callback. */
-	udp_tun_icmp_t  u_icmp_func;	/* UDP kernel tunneling icmp callback */
+	udp_tun_func_t	*u_tun_func;	/* UDP kernel tunneling callback. */
+	udp_tun_icmp_t  *u_icmp_func;	/* UDP kernel tunneling icmp callback */
 	u_int		u_flags;	/* Generic UDP flags. */
 	uint16_t	u_rxcslen;	/* Coverage for incoming datagrams. */
 	uint16_t	u_txcslen;	/* Coverage for outgoing datagrams. */
@@ -78,6 +84,7 @@ struct udpcb {
 
 #define	intoudpcb(ip)	((struct udpcb *)(ip)->inp_ppcb)
 #define	sotoudpcb(so)	(intoudpcb(sotoinpcb(so)))
+#endif
 
 				/* IPsec: ESP in UDP tunneling: */
 #define	UF_ESPINUDP_NON_IKE	0x00000001	/* w/ non-IKE marker .. */
@@ -138,7 +145,6 @@ void	kmod_udpstat_inc(int statnum);
 #include <netinet/in_pcb.h>
 SYSCTL_DECL(_net_inet_udp);
 
-extern struct pr_usrreqs	udp_usrreqs;
 VNET_DECLARE(struct inpcbinfo, udbinfo);
 VNET_DECLARE(struct inpcbinfo, ulitecbinfo);
 #define	V_udbinfo		VNET(udbinfo)
@@ -167,10 +173,7 @@ udp_get_inpcbinfo(int protocol)
 int		udp_newudpcb(struct inpcb *);
 void		udp_discardcb(struct udpcb *);
 
-void		udp_ctlinput(int, struct sockaddr *, void *);
-void		udplite_ctlinput(int, struct sockaddr *, void *);
 int		udp_ctloutput(struct socket *, struct sockopt *);
-int		udp_input(struct mbuf **, int *, int);
 void		udplite_input(struct mbuf *, int);
 struct inpcb	*udp_notify(struct inpcb *inp, int errno);
 int		udp_shutdown(struct socket *so);

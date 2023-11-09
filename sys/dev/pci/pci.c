@@ -138,7 +138,6 @@ static int		pci_reset_child(device_t dev, device_t child,
 
 static int		pci_get_id_method(device_t dev, device_t child,
 			    enum pci_id_type type, uintptr_t *rid);
-
 static struct pci_devinfo * pci_fill_devinfo(device_t pcib, device_t bus, int d,
     int b, int s, int f, uint16_t vid, uint16_t did);
 
@@ -177,6 +176,7 @@ static device_method_t pci_methods[] = {
 	DEVMETHOD(bus_child_detached,	pci_child_detached),
 	DEVMETHOD(bus_child_pnpinfo,	pci_child_pnpinfo_method),
 	DEVMETHOD(bus_child_location,	pci_child_location_method),
+	DEVMETHOD(bus_get_device_path,	pci_get_device_path_method),
 	DEVMETHOD(bus_hint_device_unit,	pci_hint_device_unit),
 	DEVMETHOD(bus_remap_intr,	pci_remap_intr_method),
 	DEVMETHOD(bus_suspend_child,	pci_suspend_child),
@@ -226,9 +226,7 @@ static device_method_t pci_methods[] = {
 
 DEFINE_CLASS_0(pci, pci_driver, pci_methods, sizeof(struct pci_softc));
 
-static devclass_t pci_devclass;
-EARLY_DRIVER_MODULE(pci, pcib, pci_driver, pci_devclass, pci_modevent, NULL,
-    BUS_PASS_BUS);
+EARLY_DRIVER_MODULE(pci, pcib, pci_driver, pci_modevent, NULL, BUS_PASS_BUS);
 MODULE_VERSION(pci, 1);
 
 static char	*pci_vendordata;
@@ -1095,6 +1093,7 @@ pci_read_vpd(device_t pcib, pcicfgregs *cfg)
 	int alloc, off;		/* alloc/off for RO/W arrays */
 	int cksumvalid;
 	int dflen;
+	int firstrecord;
 	uint8_t byte;
 	uint8_t byte2;
 
@@ -1110,14 +1109,16 @@ pci_read_vpd(device_t pcib, pcicfgregs *cfg)
 	alloc = off = 0;	/* shut up stupid gcc */
 	dflen = 0;		/* shut up stupid gcc */
 	cksumvalid = -1;
+	firstrecord = 1;
 	while (state >= 0) {
 		if (vpd_nextbyte(&vrs, &byte)) {
+			pci_printf(cfg, "VPD read timed out\n");
 			state = -2;
 			break;
 		}
 #if 0
-		printf("vpd: val: %#x, off: %d, bytesinval: %d, byte: %#hhx, " \
-		    "state: %d, remain: %d, name: %#x, i: %d\n", vrs.val,
+		pci_printf(cfg, "vpd: val: %#x, off: %d, bytesinval: %d, byte: "
+		    "%#hhx, state: %d, remain: %d, name: %#x, i: %d\n", vrs.val,
 		    vrs.off, vrs.bytesinval, byte, state, remain, name, i);
 #endif
 		switch (state) {
@@ -1138,6 +1139,15 @@ pci_read_vpd(device_t pcib, pcicfgregs *cfg)
 				remain = byte & 0x7;
 				name = (byte >> 3) & 0xf;
 			}
+			if (firstrecord) {
+				if (name != 0x2) {
+					pci_printf(cfg, "VPD data does not " \
+					    "start with ident (%#x)\n", name);
+					state = -2;
+					break;
+				}
+				firstrecord = 0;
+			}
 			if (vrs.off + remain - vrs.bytesinval > 0x8000) {
 				pci_printf(cfg,
 				    "VPD data overflow, remain %#x\n", remain);
@@ -1146,6 +1156,19 @@ pci_read_vpd(device_t pcib, pcicfgregs *cfg)
 			}
 			switch (name) {
 			case 0x2:	/* String */
+				if (cfg->vpd.vpd_ident != NULL) {
+					pci_printf(cfg,
+					    "duplicate VPD ident record\n");
+					state = -2;
+					break;
+				}
+				if (remain > 255) {
+					pci_printf(cfg,
+					    "VPD ident length %d exceeds 255\n",
+					    remain);
+					state = -2;
+					break;
+				}
 				cfg->vpd.vpd_ident = malloc(remain + 1,
 				    M_DEVBUF, M_WAITOK);
 				i = 0;
@@ -1171,7 +1194,8 @@ pci_read_vpd(device_t pcib, pcicfgregs *cfg)
 				state = 5;
 				break;
 			default:	/* Invalid data, abort */
-				state = -1;
+				pci_printf(cfg, "invalid VPD name: %#x\n", name);
+				state = -2;
 				break;
 			}
 			break;
@@ -1209,8 +1233,7 @@ pci_read_vpd(device_t pcib, pcicfgregs *cfg)
 				 * if this happens, we can't trust the rest
 				 * of the VPD.
 				 */
-				pci_printf(cfg, "bad keyword length: %d\n",
-				    dflen);
+				pci_printf(cfg, "invalid VPD RV record");
 				cksumvalid = 0;
 				state = -1;
 				break;
@@ -1226,7 +1249,7 @@ pci_read_vpd(device_t pcib, pcicfgregs *cfg)
 				    M_DEVBUF, M_WAITOK);
 			remain -= 3;
 			i = 0;
-			/* keep in sync w/ state 3's transistions */
+			/* keep in sync w/ state 3's transitions */
 			if (dflen == 0 && remain == 0)
 				state = 0;
 			else if (dflen == 0)
@@ -1253,7 +1276,7 @@ pci_read_vpd(device_t pcib, pcicfgregs *cfg)
 			}
 			dflen--;
 			remain--;
-			/* keep in sync w/ state 2's transistions */
+			/* keep in sync w/ state 2's transitions */
 			if (dflen == 0)
 				cfg->vpd.vpd_ros[off++].value[i++] = '\0';
 			if (dflen == 0 && remain == 0) {
@@ -1295,7 +1318,7 @@ pci_read_vpd(device_t pcib, pcicfgregs *cfg)
 			    M_DEVBUF, M_WAITOK);
 			remain -= 3;
 			i = 0;
-			/* keep in sync w/ state 6's transistions */
+			/* keep in sync w/ state 6's transitions */
 			if (dflen == 0 && remain == 0)
 				state = 0;
 			else if (dflen == 0)
@@ -1308,7 +1331,7 @@ pci_read_vpd(device_t pcib, pcicfgregs *cfg)
 			cfg->vpd.vpd_w[off].value[i++] = byte;
 			dflen--;
 			remain--;
-			/* keep in sync w/ state 5's transistions */
+			/* keep in sync w/ state 5's transitions */
 			if (dflen == 0)
 				cfg->vpd.vpd_w[off++].value[i++] = '\0';
 			if (dflen == 0 && remain == 0) {
@@ -1326,9 +1349,14 @@ pci_read_vpd(device_t pcib, pcicfgregs *cfg)
 			state = -1;
 			break;
 		}
+
+		if (cfg->vpd.vpd_ident == NULL || cfg->vpd.vpd_ident[0] == '\0') {
+			pci_printf(cfg, "no valid vpd ident found\n");
+			state = -2;
+		}
 	}
 
-	if (cksumvalid == 0 || state < -1) {
+	if (cksumvalid <= 0 || state < -1) {
 		/* read-only data bad, clean up */
 		if (cfg->vpd.vpd_ros != NULL) {
 			for (off = 0; cfg->vpd.vpd_ros[off].value; off++)
@@ -3142,6 +3170,21 @@ pci_find_bar(device_t dev, int reg)
 	return (NULL);
 }
 
+struct pci_map *
+pci_first_bar(device_t dev)
+{
+	struct pci_devinfo *dinfo;
+
+	dinfo = device_get_ivars(dev);
+	return (STAILQ_FIRST(&dinfo->cfg.maps));
+}
+
+struct pci_map *
+pci_next_bar(struct pci_map *pm)
+{
+	return (STAILQ_NEXT(pm, pm_link));
+}
+
 int
 pci_bar_enabled(device_t dev, struct pci_map *pm)
 {
@@ -3288,7 +3331,7 @@ pci_add_map(device_t bus, device_t dev, int reg, struct resource_list *rl,
 	 * not allow that.  It is best to ignore such entries for the
 	 * moment.  These will be allocated later if the driver specifically
 	 * requests them.  However, some removable buses look better when
-	 * all resources are allocated, so allow '0' to be overriden.
+	 * all resources are allocated, so allow '0' to be overridden.
 	 *
 	 * Similarly treat maps whose values is the same as the test value
 	 * read back.  These maps have had all f's written to them by the
@@ -4511,6 +4554,7 @@ pci_hint_device_unit(device_t dev, device_t child, const char *name, int *unitp)
 	char me1[24], me2[32];
 	uint8_t b, s, f;
 	uint32_t d;
+	device_location_cache_t *cache;
 
 	d = pci_get_domain(child);
 	b = pci_get_bus(child);
@@ -4519,13 +4563,19 @@ pci_hint_device_unit(device_t dev, device_t child, const char *name, int *unitp)
 	snprintf(me1, sizeof(me1), "pci%u:%u:%u", b, s, f);
 	snprintf(me2, sizeof(me2), "pci%u:%u:%u:%u", d, b, s, f);
 	line = 0;
+	cache = dev_wired_cache_init();
 	while (resource_find_dev(&line, name, &unit, "at", NULL) == 0) {
 		resource_string_value(name, unit, "at", &at);
-		if (strcmp(at, me1) != 0 && strcmp(at, me2) != 0)
-			continue; /* No match, try next candidate */
-		*unitp = unit;
-		return;
+		if (strcmp(at, me1) == 0 || strcmp(at, me2) == 0) {
+			*unitp = unit;
+			break;
+		}
+		if (dev_wired_cache_match(cache, child, at)) {
+			*unitp = unit;
+			break;
+		}
 	}
+	dev_wired_cache_fini(cache);
 }
 
 static void
@@ -4993,6 +5043,7 @@ static const struct
 	{PCIC_DASP,		PCIS_DASP_PERFCNTRS,	1, "performance counters"},
 	{PCIC_DASP,		PCIS_DASP_COMM_SYNC,	1, "communication synchronizer"},
 	{PCIC_DASP,		PCIS_DASP_MGMT_CARD,	1, "signal processing management"},
+	{PCIC_INSTRUMENT,	-1,			0, "non-essential instrumentation"},
 	{0, 0, 0,		NULL}
 };
 
@@ -5340,7 +5391,7 @@ pci_write_ivar(device_t dev, device_t child, int which, uintptr_t value)
  * List resources based on pci map registers, used for within ddb
  */
 
-DB_SHOW_COMMAND(pciregs, db_pci_dump)
+DB_SHOW_COMMAND_FLAGS(pciregs, db_pci_dump, DB_CMD_MEMSAFE)
 {
 	struct pci_devinfo *dinfo;
 	struct devlist *devlist_head;
@@ -5608,7 +5659,7 @@ pci_release_resource(device_t dev, device_t child, int type, int rid,
 {
 	struct pci_devinfo *dinfo;
 	struct resource_list *rl;
-	pcicfgregs *cfg;
+	pcicfgregs *cfg __unused;
 
 	if (device_get_parent(child) != dev)
 		return (BUS_RELEASE_RESOURCE(device_get_parent(dev), child,
@@ -5618,7 +5669,7 @@ pci_release_resource(device_t dev, device_t child, int type, int rid,
 	cfg = &dinfo->cfg;
 
 #ifdef PCI_IOV
-	if (dinfo->cfg.flags & PCICFG_VF) {
+	if (cfg->flags & PCICFG_VF) {
 		switch (type) {
 		/* VFs can't have I/O BARs. */
 		case SYS_RES_IOPORT:
@@ -5885,6 +5936,24 @@ pci_child_pnpinfo_method(device_t dev, device_t child, struct sbuf *sb)
 	    cfg->subvendor, cfg->subdevice, cfg->baseclass, cfg->subclass,
 	    cfg->progif);
 	return (0);
+}
+
+int
+pci_get_device_path_method(device_t bus, device_t child, const char *locator,
+    struct sbuf *sb)
+{
+	device_t parent = device_get_parent(bus);
+	int rv;
+
+	if (strcmp(locator, BUS_LOCATOR_UEFI) == 0) {
+		rv = bus_generic_get_device_path(parent, bus, locator, sb);
+		if (rv == 0) {
+			sbuf_printf(sb, "/Pci(0x%x,0x%x)", pci_get_slot(child),
+			    pci_get_function(child));
+		}
+		return (0);
+	}
+	return (bus_generic_get_device_path(bus, child, locator, sb));
 }
 
 int
@@ -6733,7 +6802,7 @@ pci_print_faulted_dev(void)
 }
 
 #ifdef DDB
-DB_SHOW_COMMAND(pcierr, pci_print_faulted_dev_db)
+DB_SHOW_COMMAND_FLAGS(pcierr, pci_print_faulted_dev_db, DB_CMD_MEMSAFE)
 {
 
 	pci_print_faulted_dev();
@@ -6762,7 +6831,7 @@ db_clear_pcie_errors(const struct pci_devinfo *dinfo)
 		pci_write_config(dev, aer + PCIR_AER_COR_STATUS, r, 4);
 }
 
-DB_COMMAND(pci_clearerr, db_pci_clearerr)
+DB_COMMAND_FLAGS(pci_clearerr, db_pci_clearerr, DB_CMD_MEMSAFE)
 {
 	struct pci_devinfo *dinfo;
 	device_t dev;

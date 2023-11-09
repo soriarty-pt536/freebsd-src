@@ -98,7 +98,7 @@ void
 pqisrc_configure_legacy_intx(pqisrc_softstate_t *softs, boolean_t enable_intx)
 {
 	uint32_t intx_mask;
-	uint32_t *reg_addr = NULL;
+	uint32_t *reg_addr __unused;
 
 	DBG_FUNC("IN\n");
 
@@ -150,7 +150,7 @@ pqisrc_take_ctrl_offline(pqisrc_softstate_t *softs)
 
 	if (SIS_IS_KERNEL_PANIC(softs)) {
                 lockupcode = PCI_MEM_GET32(softs, &softs->ioa_reg->mb[7], LEGACY_SIS_SRCV_OFFSET_MAILBOX_7);
-                DBG_ERR("Controller FW is not runnning, Lockup code = %x\n", lockupcode);
+                DBG_ERR("Controller FW is not running, Lockup code = %x\n", lockupcode);
         }
         else {
                 pqisrc_trigger_nmi_sis(softs);
@@ -305,11 +305,54 @@ pqisrc_raidlevel_to_string(uint8_t raid_level)
 }
 
 /* Debug routine for displaying device info */
-void
-pqisrc_display_device_info(pqisrc_softstate_t *softs,
+void pqisrc_display_device_info(pqisrc_softstate_t *softs,
 	char *action, pqi_scsi_dev_t *device)
 {
-	DBG_INFO( "%s scsi BTL %d:%d:%d:  %.8s %.16s %-12s SSDSmartPathCap%c En%c Exp%c qd=%d\n",
+	if (device->is_physical_device) {
+		DBG_NOTE("%s scsi BTL %d:%d:%d:  %.8s %.16s %-12s "
+		"SSDSmartPathCap%c En%c Exp%c qd=%d\n",
+		action,
+		device->bus,
+		device->target,
+		device->lun,
+		device->vendor,
+		device->model,
+		"Physical",
+		device->offload_config ? '+' : '-',
+		device->offload_enabled_pending ? '+' : '-',
+		device->expose_device ? '+' : '-',
+		device->queue_depth);
+	} else if (device->devtype == RAID_DEVICE) {
+		DBG_NOTE("%s scsi BTL %d:%d:%d:  %.8s %.16s %-12s "
+		"SSDSmartPathCap%c En%c Exp%c qd=%d\n",
+		action,
+		device->bus,
+		device->target,
+		device->lun,
+		device->vendor,
+		device->model,
+		"Controller",
+		device->offload_config ? '+' : '-',
+		device->offload_enabled_pending ? '+' : '-',
+		device->expose_device ? '+' : '-',
+		device->queue_depth);
+	} else if (device->devtype == CONTROLLER_DEVICE) {
+		DBG_NOTE("%s scsi BTL %d:%d:%d:  %.8s %.16s %-12s "
+		"SSDSmartPathCap%c En%c Exp%c qd=%d\n",
+		action,
+		device->bus,
+		device->target,
+		device->lun,
+		device->vendor,
+		device->model,
+		"External",
+		device->offload_config ? '+' : '-',
+		device->offload_enabled_pending ? '+' : '-',
+		device->expose_device ? '+' : '-',
+		device->queue_depth);
+	} else {
+		DBG_NOTE("%s scsi BTL %d:%d:%d:  %.8s %.16s %-12s "
+		"SSDSmartPathCap%c En%c Exp%c qd=%d devtype=%d\n",
 		action,
 		device->bus,
 		device->target,
@@ -320,13 +363,15 @@ pqisrc_display_device_info(pqisrc_softstate_t *softs,
 		device->offload_config ? '+' : '-',
 		device->offload_enabled_pending ? '+' : '-',
 		device->expose_device ? '+' : '-',
-		device->queue_depth);
+		device->queue_depth,
+		device->devtype);
 	pqisrc_raidlevel_to_string(device->raid_level); /* To use this function */
+	}
 }
 
 /* validate the structure sizes */
 void
-check_struct_sizes()
+check_struct_sizes(void)
 {
 
     ASSERT(sizeof(SCSI3Addr_struct)== 2);

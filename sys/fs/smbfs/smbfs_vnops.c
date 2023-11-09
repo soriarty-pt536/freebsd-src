@@ -628,7 +628,9 @@ smbfs_rename(ap)
 	struct componentname *tcnp = ap->a_tcnp;
 /*	struct componentname *fcnp = ap->a_fcnp;*/
 	struct smb_cred *scred;
+#ifdef notnow
 	u_int16_t flags = 6;
+#endif
 	int error=0;
 
 	scred = NULL;
@@ -643,11 +645,17 @@ smbfs_rename(ap)
 		error = EBUSY;
 		goto out;
 	}
+#ifdef notnow
 	flags = 0x10;			/* verify all writes */
+#endif
 	if (fvp->v_type == VDIR) {
+#ifdef notnow
 		flags |= 2;
+#endif
 	} else if (fvp->v_type == VREG) {
+#ifdef notnow
 		flags |= 1;
+#endif
 	} else {
 		return EINVAL;
 	}
@@ -1233,8 +1241,6 @@ smbfs_lookup(ap)
 		   killit = 1;
 		else if (error == 0
 	     /*    && vattr.va_ctime.tv_sec == VTOSMB(vp)->n_ctime*/) {
-		     if (nameiop != LOOKUP && islastcn)
-			     cnp->cn_flags |= SAVENAME;
 		     SMBVDEBUG("use cached vnode\n");
 		     return (0);
 		}
@@ -1288,7 +1294,6 @@ smbfs_lookup(ap)
 			error = VOP_ACCESS(dvp, VWRITE, cnp->cn_cred, td);
 			if (error)
 				goto out;
-			cnp->cn_flags |= SAVENAME;
 			error = EJUSTRETURN;
 			goto out;
 		}
@@ -1313,7 +1318,6 @@ smbfs_lookup(ap)
 		if (error)
 			goto out;
 		*vpp = vp;
-		cnp->cn_flags |= SAVENAME;
 		goto out;
 	}
 	if (nameiop == RENAME && islastcn) {
@@ -1328,7 +1332,6 @@ smbfs_lookup(ap)
 		if (error)
 			goto out;
 		*vpp = vp;
-		cnp->cn_flags |= SAVENAME;
 		goto out;
 	}
 	if (flags & ISDOTDOT) {

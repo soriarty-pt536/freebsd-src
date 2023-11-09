@@ -84,9 +84,9 @@
 #  4.  `make installkernel KERNCONF=YOUR_KERNEL_HERE'   (default is GENERIC).
 #       [steps 3. & 4. can be combined by using the "kernel" target]
 #  5.  `reboot'        (in single user mode: boot -s from the loader prompt).
-#  6.  `mergemaster -p'
+#  6.  `etcupdate -p'
 #  7.  `make installworld'
-#  8.  `mergemaster'            (you may wish to use -i, along with -U or -F).
+#  8.  `etcupdate -B'
 #  9.  `make delete-old'
 # 10.  `reboot'
 # 11.  `make delete-old-libs' (in case no 3rd party program uses them anymore)
@@ -526,11 +526,14 @@ TARGET_ARCHES_${target}?= ${target}
 .endfor
 
 .if defined(USE_GCC_TOOLCHAINS)
-TOOLCHAINS_amd64=	amd64-gcc6
-TOOLCHAINS_arm64=	aarch64-gcc6
-TOOLCHAINS_i386=	i386-gcc6
-TOOLCHAINS_powerpc=	powerpc-gcc6 powerpc64-gcc6
-TOOLCHAIN_powerpc64=	powerpc64-gcc6
+TOOLCHAINS_amd64=	amd64-gcc9
+TOOLCHAINS_arm=		armv6-gcc9 armv7-gcc9
+TOOLCHAIN_armv7=	armv7-gcc9
+TOOLCHAINS_arm64=	aarch64-gcc9
+TOOLCHAINS_i386=	i386-gcc9
+TOOLCHAINS_powerpc=	powerpc-gcc9 powerpc64-gcc9
+TOOLCHAIN_powerpc64=	powerpc64-gcc9
+TOOLCHAINS_riscv=	riscv64-gcc9
 .endif
 
 # If a target is using an external toolchain, set MAKE_PARAMS to enable use

@@ -190,8 +190,8 @@ MAN=	accept_filter.9 \
 	ifnet.9 \
 	inittodr.9 \
 	insmntque.9 \
+	intr_event.9 \
 	intro.9 \
-	ithread.9 \
 	kasan.9 \
 	KASSERT.9 \
 	kern_reboot.9 \
@@ -241,6 +241,7 @@ MAN=	accept_filter.9 \
 	OF_package_to_path.9 \
 	ofw_bus_is_compatible.9 \
 	ofw_bus_status_okay.9 \
+	ofw_graph.9 \
 	osd.9 \
 	owll.9 \
 	own.9 \
@@ -705,6 +706,14 @@ MLINKS+=bus_space.9 bus_space_alloc.9 \
 	bus_space.9 bus_space_copy_region_stream_8.9 \
 	bus_space.9 bus_space_free.9 \
 	bus_space.9 bus_space_map.9 \
+	bus_space.9 bus_space_peek_1.9 \
+	bus_space.9 bus_space_peek_2.9 \
+	bus_space.9 bus_space_peek_4.9 \
+	bus_space.9 bus_space_peek_8.9 \
+	bus_space.9 bus_space_poke_1.9 \
+	bus_space.9 bus_space_poke_2.9 \
+	bus_space.9 bus_space_poke_4.9 \
+	bus_space.9 bus_space_poke_8.9 \
 	bus_space.9 bus_space_read_1.9 \
 	bus_space.9 bus_space_read_2.9 \
 	bus_space.9 bus_space_read_4.9 \
@@ -965,8 +974,15 @@ MLINKS+=crypto_session.9 crypto_auth_hash.9 \
 	crypto_session.9 crypto_get_params.9 \
 	crypto_session.9 crypto_newsession.9 \
 	crypto_session.9 crypto_freesession.9
-MLINKS+=DB_COMMAND.9 DB_SHOW_ALL_COMMAND.9 \
-	DB_COMMAND.9 DB_SHOW_COMMAND.9
+MLINKS+=DB_COMMAND.9 DB_ALIAS.9 \
+	DB_COMMAND.9 DB_ALIAS_FLAGS.9 \
+	DB_COMMAND.9 DB_COMMAND_FLAGS.9 \
+	DB_COMMAND.9 DB_SHOW_ALIAS.9 \
+	DB_COMMAND.9 DB_SHOW_ALIAS_FLAGS.9 \
+	DB_COMMAND.9 DB_SHOW_ALL_ALIAS.9 \
+	DB_COMMAND.9 DB_SHOW_ALL_COMMAND.9 \
+	DB_COMMAND.9 DB_SHOW_COMMAND.9 \
+	DB_COMMAND.9 DB_SHOW_COMMAND_FLAGS.9
 MLINKS+=DECLARE_MODULE.9 DECLARE_MODULE_TIED.9
 MLINKS+=dev_clone.9 drain_dev_clone_events.9
 MLINKS+=dev_refthread.9 devvn_refthread.9 \
@@ -1015,13 +1031,10 @@ MLINKS+=dnv.9 dnvlist.9 \
 	dnv.9 dnvlist_take_number.9 \
 	dnv.9 dnvlist_take_nvlist.9 \
 	dnv.9 dnvlist_take_string.9
-MLINKS+=domain.9 DOMAIN_SET.9 \
+MLINKS+=domain.9 protosw.9 \
 	domain.9 domain_add.9 \
-	domain.9 domain_init.9 \
-	domain.9 pfctlinput.9 \
-	domain.9 pffinddomain.9 \
-	domain.9 pffindproto.9 \
-	domain.9 pffindtype.9
+	domain.9 protosw_register.9 \
+	domain.9 protosw_unregister.9
 MLINKS+=drbr.9 drbr_free.9 \
 	drbr.9 drbr_enqueue.9 \
 	drbr.9 drbr_dequeue.9 \
@@ -1306,12 +1319,12 @@ MLINKS+=ifnet.9 if_addmulti.9 \
 	ifnet.9 ifunit.9 \
 	ifnet.9 ifunit_ref.9
 MLINKS+=insmntque.9 insmntque1.9
-MLINKS+=ithread.9 ithread_add_handler.9 \
-	ithread.9 ithread_create.9 \
-	ithread.9 ithread_destroy.9 \
-	ithread.9 ithread_priority.9 \
-	ithread.9 ithread_remove_handler.9 \
-	ithread.9 ithread_schedule.9
+MLINKS+=intr_event.9 intr_event_add_handler.9 \
+	intr_event.9 intr_event_create.9 \
+	intr_event.9 intr_event_destroy.9 \
+	intr_event.9 intr_event_handle.9 \
+	intr_event.9 intr_event_remove_handler.9 \
+	intr_event.9 intr_priority.9
 MLINKS+=kernacc.9 useracc.9
 MLINKS+=kernel_mount.9 free_mntarg.9 \
 	kernel_mount.9 mount_arg.9 \
@@ -1359,7 +1372,6 @@ MLINKS+=kqueue.9 knlist_add.9 \
 	kqueue.9 knlist_empty.9 \
 	kqueue.9 knlist_init.9 \
 	kqueue.9 knlist_init_mtx.9 \
-	kqueue.9 knlist_init_rw_reader.9 \
 	kqueue.9 knlist_remove.9 \
 	kqueue.9 knlist_remove_inevent.9 \
 	kqueue.9 knote_fdclose.9 \
@@ -1406,13 +1418,19 @@ MLINKS+=make_dev.9 destroy_dev.9 \
 	make_dev.9 make_dev_p.9 \
 	make_dev.9 make_dev_s.9
 MLINKS+=malloc.9 free.9 \
+	malloc.9 malloc_aligned.9 \
 	malloc.9 malloc_domainset.9 \
+	malloc.9 malloc_domainset_aligned.9 \
+	malloc.9 malloc_domainset_exec.9 \
+	malloc.9 malloc_exec.9 \
+	malloc.9 malloc_usable_size.9 \
 	malloc.9 mallocarray.9 \
 	malloc.9 mallocarray_domainset.9 \
 	malloc.9 MALLOC_DECLARE.9 \
 	malloc.9 MALLOC_DEFINE.9 \
 	malloc.9 realloc.9 \
-	malloc.9 reallocf.9
+	malloc.9 reallocf.9 \
+	malloc.9 zfree.9
 MLINKS+=mbchain.9 mb_detach.9 \
 	mbchain.9 mb_done.9 \
 	mbchain.9 mb_fixhdr.9 \
@@ -1456,6 +1474,7 @@ MLINKS+=\
 	mbuf.9 MGET.9 \
 	mbuf.9 m_get.9 \
 	mbuf.9 m_get2.9 \
+	mbuf.9 m_get3.9 \
 	mbuf.9 m_getjcl.9 \
 	mbuf.9 m_getcl.9 \
 	mbuf.9 MGETHDR.9 \
@@ -1686,6 +1705,12 @@ MLINKS+=ofw_bus_is_compatible.9 ofw_bus_is_compatible_strict.9 \
 	ofw_bus_is_compatible.9 ofw_bus_search_compatible.9
 MLINKS+= ofw_bus_status_okay.9 ofw_bus_get_status.9 \
 	ofw_bus_status_okay.9 ofw_bus_node_status_okay.9
+MLINKS+=ofw_graph.9 ofw_graph_get_device_by_port_ep.9 \
+	ofw_graph.9 ofw_graph_get_endpoint_by_idx.9 \
+	ofw_graph.9 ofw_graph_get_port_by_idx.9 \
+	ofw_graph.9 ofw_graph_get_remove_endpoint.9 \
+	ofw_graph.9 ofw_graph_get_remove_parent.9 \
+	ofw_graph.9 ofw_graph_port_get_num_endpoints.9
 MLINKS+=osd.9 osd_call.9 \
 	osd.9 osd_del.9 \
 	osd.9 osd_deregister.9 \

@@ -437,7 +437,7 @@ mac_veriexec_sysctl_check(struct ucred *cred, struct sysctl_oid *oidp,
 		return (0);
 
 	oid = oidp;
-	if (oid->oid_kind & CTLFLAG_SECURE) {
+	if (req->newptr && (oid->oid_kind & CTLFLAG_SECURE)) {
 		return (EPERM);		/* XXX call mac_veriexec_priv_check? */
 	}
 	return 0;
@@ -705,7 +705,7 @@ cleanup_file:
 		error = namei(&nd);
 		if (error != 0)
 			break;
-		NDFREE(&nd, NDF_ONLY_PNBUF);
+		NDFREE_PNBUF(&nd);
 
 		/* Check the fingerprint status of the vnode */
 		error = mac_veriexec_check_vp(td->td_ucred, nd.ni_vp, VVERIFY);

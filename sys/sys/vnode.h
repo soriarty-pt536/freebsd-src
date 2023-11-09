@@ -270,12 +270,13 @@ struct xvnode {
 #define	VV_COPYONWRITE	0x0040	/* vnode is doing copy-on-write */
 #define	VV_SYSTEM	0x0080	/* vnode being used by kernel */
 #define	VV_PROCDEP	0x0100	/* vnode is process dependent */
-/* UNUSED		0x0200	*/
+#define	VV_UNLINKED	0x0200	/* unlinked but stil open directory */
 #define	VV_DELETED	0x0400	/* should be removed */
 #define	VV_MD		0x0800	/* vnode backs the md device */
 #define	VV_FORCEINSMQ	0x1000	/* force the insmntque to succeed */
 #define	VV_READLINK	0x2000	/* fdescfs linux vnode */
 #define	VV_UNREF	0x4000	/* vunref, do not drop lock in inactive() */
+#define	VV_CROSSLOCK	0x8000	/* vnode lock is shared w/ root mounted here */
 
 #define	VMP_LAZYLIST	0x0001	/* Vnode is on mnt's lazy list */
 
@@ -431,7 +432,8 @@ extern int		vttoif_tab[];
 #define	V_WAIT		0x0001	/* vn_start_write: sleep for suspend */
 #define	V_NOWAIT	0x0002	/* vn_start_write: don't sleep for suspend */
 #define	V_XSLEEP	0x0004	/* vn_start_write: just return after sleep */
-#define	V_MNTREF	0x0010	/* vn_start_write: mp is already ref-ed */
+#define	V_PCATCH	0x0008	/* vn_start_write: make the sleep interruptible */
+#define	V_VALID_FLAGS (V_WAIT | V_NOWAIT | V_XSLEEP | V_PCATCH)
 
 #define	VR_START_WRITE	0x0001	/* vfs_write_resume: start write atomically */
 #define	VR_NO_SUSPCLR	0x0002	/* vfs_write_resume: do not clear suspension */
@@ -616,6 +618,7 @@ typedef void vop_getpages_iodone_t(void *, vm_page_t *, int, int);
 #define	VN_OPEN_NOCAPCHECK	0x00000002
 #define	VN_OPEN_NAMECACHE	0x00000004
 #define	VN_OPEN_INVFS		0x00000008
+#define	VN_OPEN_WANTIOCTLCAPS	0x00000010
 
 /* copy_file_range kernel flags */
 #define	COPY_FILE_RANGE_KFLAGS		0xff000000
@@ -674,9 +677,15 @@ void	cache_vop_rmdir(struct vnode *dvp, struct vnode *vp);
 #ifdef INVARIANTS
 void	cache_validate(struct vnode *dvp, struct vnode *vp,
 	    struct componentname *cnp);
+void	cache_assert_no_entries(struct vnode *vp);
 #else
 static inline void
 cache_validate(struct vnode *dvp, struct vnode *vp, struct componentname *cnp)
+{
+}
+
+static inline void
+cache_assert_no_entries(struct vnode *vp)
 {
 }
 #endif
@@ -784,6 +793,10 @@ int	vn_rdwr_inchunks(enum uio_rw rw, struct vnode *vp, void *base,
 int	vn_read_from_obj(struct vnode *vp, struct uio *uio);
 int	vn_rlimit_fsize(const struct vnode *vp, const struct uio *uio,
 	    struct thread *td);
+int	vn_rlimit_fsizex(const struct vnode *vp, struct uio *uio,
+	    off_t maxfsz, ssize_t *resid_adj, struct thread *td);
+void	vn_rlimit_fsizex_res(struct uio *uio, ssize_t resid_adj);
+int	vn_rlimit_trunc(u_quad_t size, struct thread *td);
 int	vn_start_write(struct vnode *vp, struct mount **mpp, int flags);
 int	vn_start_secondary_write(struct vnode *vp, struct mount **mpp,
 	    int flags);
@@ -966,18 +979,23 @@ void	vop_mkdir_debugpost(void *a, int rc);
 void	vop_rename_fail(struct vop_rename_args *ap);
 
 #define	vop_stat_helper_pre(ap)	({						\
+	struct vop_stat_args *_ap = (ap);					\
 	int _error;								\
 	AUDIT_ARG_VNODE1(ap->a_vp);						\
-	_error = mac_vnode_check_stat(ap->a_active_cred, ap->a_file_cred, ap->a_vp);\
-	if (__predict_true(_error == 0))					\
-		bzero(ap->a_sb, sizeof(*ap->a_sb));				\
+	_error = mac_vnode_check_stat(_ap->a_active_cred, _ap->a_file_cred, _ap->a_vp);\
+	if (__predict_true(_error == 0)) {					\
+		ap->a_sb->st_padding0 = 0;					\
+		ap->a_sb->st_padding1 = 0;					\
+		bzero(_ap->a_sb->st_spare, sizeof(_ap->a_sb->st_spare));	\
+	}									\
 	_error;									\
 })
 
 #define	vop_stat_helper_post(ap, error)	({					\
+	struct vop_stat_args *_ap = (ap);					\
 	int _error = (error);							\
-	if (priv_check_cred_vfs_generation(ap->a_active_cred))			\
-		ap->a_sb->st_gen = 0;						\
+	if (priv_check_cred_vfs_generation(_ap->a_active_cred))			\
+		_ap->a_sb->st_gen = 0;						\
 	_error;									\
 })
 

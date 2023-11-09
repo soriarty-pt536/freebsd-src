@@ -107,6 +107,7 @@ get_vfpcontext(struct thread *td, mcontext_vfp_t *vfp)
 		critical_exit();
 	} else
 		MPASS(TD_IS_SUSPENDED(td));
+	memset(vfp, 0, sizeof(*vfp));
 	memcpy(vfp->mcv_reg, pcb->pcb_vfpstate.reg,
 	    sizeof(vfp->mcv_reg));
 	vfp->mcv_fpscr = pcb->pcb_vfpstate.fpscr;
@@ -273,13 +274,11 @@ sendsig(sig_t catcher, ksiginfo_t *ksi, sigset_t *mask)
 	struct sysentvec *sysent;
 	int onstack;
 	int sig;
-	int code;
 
 	td = curthread;
 	p = td->td_proc;
 	PROC_LOCK_ASSERT(p, MA_OWNED);
 	sig = ksi->ksi_signo;
-	code = ksi->ksi_code;
 	psp = p->p_sigacts;
 	mtx_assert(&psp->ps_mtx, MA_OWNED);
 	tf = td->td_frame;
@@ -347,8 +346,8 @@ sendsig(sig_t catcher, ksiginfo_t *ksi, sigset_t *mask)
 	tf->tf_pc = (register_t)catcher;
 	tf->tf_usr_sp = (register_t)fp;
 	sysent = p->p_sysent;
-	if (sysent->sv_sigcode_base != 0)
-		tf->tf_usr_lr = (register_t)sysent->sv_sigcode_base;
+	if (PROC_HAS_SHP(p))
+		tf->tf_usr_lr = (register_t)PROC_SIGCODE(p);
 	else
 		tf->tf_usr_lr = (register_t)(PROC_PS_STRINGS(p) -
 		    *(sysent->sv_szsigcode));

@@ -6,7 +6,7 @@
  * You may not use this file except in compliance with the License.
  *
  * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
- * or http://www.opensolaris.org/os/licensing.
+ * or https://opensource.org/licenses/CDDL-1.0.
  * See the License for the specific language governing permissions
  * and limitations under the License.
  *
@@ -159,5 +159,21 @@ _ZFS_FLETCHER_H const fletcher_4_ops_t fletcher_4_aarch64_neon_ops;
 #ifdef	__cplusplus
 }
 #endif
+
+#if	defined(ZFS_UBSAN_ENABLED)
+#if	defined(__has_attribute)
+#if	__has_attribute(no_sanitize_undefined)
+#define	ZFS_NO_SANITIZE_UNDEFINED __attribute__((no_sanitize_undefined))
+#elif	__has_attribute(no_sanitize)
+#define	ZFS_NO_SANITIZE_UNDEFINED __attribute__((no_sanitize("undefined")))
+#else
+#error	"Compiler has to support attribute "
+	"`no_sanitize_undefined` or `no_sanitize(\"undefined\")`"
+	"when compiling with UBSan enabled"
+#endif	/* __has_attribute(no_sanitize_undefined) */
+#endif	/* defined(__has_attribute) */
+#else
+#define	ZFS_NO_SANITIZE_UNDEFINED
+#endif	/* defined(ZFS_UBSAN_ENABLED) */
 
 #endif	/* _ZFS_FLETCHER_H */

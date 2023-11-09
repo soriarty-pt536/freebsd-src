@@ -7121,7 +7121,7 @@ ipf_ipftune(ipf_main_softc_t *softc, ioctlcmd_t cmd, void *data)
 	case SIOCIPFSET :
 		/*
 		 * Search by name or by cookie value for a particular entry
-		 * in the tuning paramter table.
+		 * in the tuning parameter table.
 		 */
 		IPFERROR(77);
 		error = ESRCH;
@@ -7360,7 +7360,7 @@ ipf_token_expire(ipf_main_softc_t *softc)
 /* Loop through all of the existing tokens and call deref to see if they    */
 /* can be freed. Normally a function like this might just loop on           */
 /* ipf_token_head but there is a chance that a token might have a ref count */
-/* of greater than one and in that case the the reference would drop twice  */
+/* of greater than one and in that case the reference would drop twice      */
 /* by code that is only entitled to drop it once.                           */
 /* ------------------------------------------------------------------------ */
 static void
@@ -7385,7 +7385,7 @@ ipf_token_flush(ipf_main_softc_t *softc)
 /*              uid(I)  - uid owning the token                              */
 /*              ptr(I)  - context pointer for the token                     */
 /*                                                                          */
-/* This function looks for a a token in the current list that matches up    */
+/* This function looks for a token in the current list that matches up      */
 /* the fields (type, uid, ptr).  If none is found, ESRCH is returned, else  */
 /* call ipf_token_dewref() to remove it from the list. In the event that    */
 /* the token has a reference held elsewhere, setting ipt_complete to 2      */

@@ -112,7 +112,7 @@ struct cc_var {
 #define	CCF_IPHDR_CE		0x0010	/* Does this packet set CE bit? */
 #define	CCF_TCPHDR_CWR		0x0020	/* Does this packet set CWR bit? */
 #define	CCF_MAX_CWND		0x0040	/* Have we reached maximum cwnd? */
-#define	CCF_CHG_MAX_CWND	0x0080	/* Cubic max_cwnd changed, for K */
+#define	CCF_CHG_MAX_CWND	0x0080	/* CUBIC max_cwnd changed, for K */
 #define	CCF_USR_IWND		0x0100	/* User specified initial window */
 #define	CCF_USR_IWND_INIT_NSEG	0x0200	/* Convert segs to bytes on conn init */
 #define CCF_HYSTART_ALLOWED	0x0400	/* If the CC supports it Hystart is allowed */
@@ -200,6 +200,7 @@ struct cc_algo {
 	int     (*ctl_output)(struct cc_var *, struct sockopt *, void *);
 
 	STAILQ_ENTRY (cc_algo) entries;
+	u_int	cc_refcount;
 	uint8_t flags;
 };
 
@@ -235,6 +236,16 @@ void newreno_cc_post_recovery(struct cc_var *);
 void newreno_cc_after_idle(struct cc_var *);
 void newreno_cc_cong_signal(struct cc_var *, uint32_t );
 void newreno_cc_ack_received(struct cc_var *, uint16_t);
+
+/* Called to temporarily keep an algo from going away during change */
+void cc_refer(struct cc_algo *algo);
+/* Called to release the temporary hold */
+void cc_release(struct cc_algo *algo);
+
+/* Called to attach a CC algorithm to a tcpcb */
+void cc_attach(struct tcpcb *, struct cc_algo *);
+/* Called to detach a CC algorithm from a tcpcb */
+void cc_detach(struct tcpcb *);
 
 #endif /* _KERNEL */
 #endif /* _NETINET_CC_CC_H_ */

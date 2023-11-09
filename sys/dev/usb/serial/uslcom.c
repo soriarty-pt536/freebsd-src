@@ -372,15 +372,13 @@ static device_method_t uslcom_methods[] = {
 	DEVMETHOD_END
 };
 
-static devclass_t uslcom_devclass;
-
 static driver_t uslcom_driver = {
 	.name = "uslcom",
 	.methods = uslcom_methods,
 	.size = sizeof(struct uslcom_softc),
 };
 
-DRIVER_MODULE(uslcom, uhub, uslcom_driver, uslcom_devclass, NULL, 0);
+DRIVER_MODULE(uslcom, uhub, uslcom_driver, NULL, NULL);
 MODULE_DEPEND(uslcom, ucom, 1, 1, 1);
 MODULE_DEPEND(uslcom, usb, 1, 1, 1);
 MODULE_VERSION(uslcom, 1);
@@ -441,12 +439,6 @@ uslcom_attach(device_t dev)
 		    "error=%s\n", usbd_errstr(error));
 		goto detach;
 	}
-	/* clear stall at first run */
-	mtx_lock(&sc->sc_mtx);
-	usbd_xfer_set_stall(sc->sc_xfer[USLCOM_BULK_DT_WR]);
-	usbd_xfer_set_stall(sc->sc_xfer[USLCOM_BULK_DT_RD]);
-	mtx_unlock(&sc->sc_mtx);
-
 	sc->sc_partnum = uslcom_get_partnum(sc);
 
 	error = ucom_attach(&sc->sc_super_ucom, &sc->sc_ucom, 1, sc,
@@ -515,6 +507,10 @@ uslcom_cfg_open(struct ucom_softc *ucom)
 	    &req, NULL, 0, 1000)) {
 		DPRINTF("UART enable failed (ignored)\n");
 	}
+
+	/* clear stall */
+	usbd_xfer_set_stall(sc->sc_xfer[USLCOM_BULK_DT_WR]);
+	usbd_xfer_set_stall(sc->sc_xfer[USLCOM_BULK_DT_RD]);
 
 	/* start polling status */
 	uslcom_watchdog(sc);

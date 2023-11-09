@@ -1,4 +1,4 @@
-/* $OpenBSD: readconf.c,v 1.363 2021/09/16 05:36:03 djm Exp $ */
+/* $OpenBSD: readconf.c,v 1.369 2022/09/17 10:33:18 djm Exp $ */
 /*
  * Author: Tatu Ylonen <ylo@cs.hut.fi>
  * Copyright (c) 1995 Tatu Ylonen <ylo@cs.hut.fi>, Espoo, Finland
@@ -13,7 +13,6 @@
  */
 
 #include "includes.h"
-__RCSID("$FreeBSD$");
 
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -68,7 +67,6 @@ __RCSID("$FreeBSD$");
 #include "uidswap.h"
 #include "myproposal.h"
 #include "digest.h"
-#include "version.h"
 
 /* Format of the configuration file:
 
@@ -143,7 +141,6 @@ static int process_config_line_depth(Options *options, struct passwd *pw,
 
 typedef enum {
 	oBadOption,
-	oVersionAddendum,
 	oHost, oMatch, oInclude,
 	oForwardAgent, oForwardX11, oForwardX11Trusted, oForwardX11Timeout,
 	oGatewayPorts, oExitOnForwardFailure,
@@ -177,7 +174,7 @@ typedef enum {
 	oStreamLocalBindMask, oStreamLocalBindUnlink, oRevokedHostKeys,
 	oFingerprintHash, oUpdateHostkeys, oHostbasedAcceptedAlgorithms,
 	oPubkeyAcceptedAlgorithms, oCASignatureAlgorithms, oProxyJump,
-	oSecurityKeyProvider, oKnownHostsCommand,
+	oSecurityKeyProvider, oKnownHostsCommand, oRequiredRSASize,
 	oIgnore, oIgnoredUnknownOption, oDeprecated, oUnsupported
 } OpCodes;
 
@@ -323,6 +320,7 @@ static struct {
 	{ "proxyjump", oProxyJump },
 	{ "securitykeyprovider", oSecurityKeyProvider },
 	{ "knownhostscommand", oKnownHostsCommand },
+	{ "requiredrsasize", oRequiredRSASize },
 
 	{ "hpndisabled", oDeprecated },
 	{ "hpnbuffersize", oDeprecated },
@@ -330,7 +328,7 @@ static struct {
 	{ "tcprcvbuf", oDeprecated },
 	{ "noneenabled", oUnsupported },
 	{ "noneswitch", oUnsupported },
-	{ "versionaddendum", oVersionAddendum },
+	{ "versionaddendum", oDeprecated },
 
 	{ NULL, oBadOption }
 };
@@ -764,20 +762,16 @@ match_cfg_line(Options *options, char **condition, struct passwd *pw,
 static void
 rm_env(Options *options, const char *arg, const char *filename, int linenum)
 {
-	int i, j, onum_send_env = options->num_send_env;
-	char *cp;
+	u_int i, j, onum_send_env = options->num_send_env;
 
 	/* Remove an environment variable */
 	for (i = 0; i < options->num_send_env; ) {
-		cp = xstrdup(options->send_env[i]);
-		if (!match_pattern(cp, arg + 1)) {
-			free(cp);
+		if (!match_pattern(options->send_env[i], arg + 1)) {
 			i++;
 			continue;
 		}
 		debug3("%s line %d: removing environment %s",
-		    filename, linenum, cp);
-		free(cp);
+		    filename, linenum, options->send_env[i]);
 		free(options->send_env[i]);
 		options->send_env[i] = NULL;
 		for (j = i; j < options->num_send_env - 1; j++) {
@@ -901,6 +895,15 @@ static const struct multistate multistate_canonicalizehostname[] = {
 	{ "always",			SSH_CANONICALISE_ALWAYS },
 	{ NULL, -1 }
 };
+static const struct multistate multistate_pubkey_auth[] = {
+	{ "true",			SSH_PUBKEY_AUTH_ALL },
+	{ "false",			SSH_PUBKEY_AUTH_NO },
+	{ "yes",			SSH_PUBKEY_AUTH_ALL },
+	{ "no",				SSH_PUBKEY_AUTH_NO },
+	{ "unbound",			SSH_PUBKEY_AUTH_UNBOUND },
+	{ "host-bound",			SSH_PUBKEY_AUTH_HBOUND },
+	{ NULL, -1 }
+};
 static const struct multistate multistate_compression[] = {
 #ifdef WITH_ZLIB
 	{ "yes",			COMP_ZLIB },
@@ -945,7 +948,7 @@ process_config_line_depth(Options *options, struct passwd *pw, const char *host,
     const char *original_host, char *line, const char *filename,
     int linenum, int *activep, int flags, int *want_final_pass, int depth)
 {
-	char *str, **charptr, *endofnumber, *keyword, *arg, *arg2, *p, ch;
+	char *str, **charptr, *endofnumber, *keyword, *arg, *arg2, *p;
 	char **cpptr, ***cppptr, fwdarg[256];
 	u_int i, *uintptr, uvalue, max_entries = 0;
 	int r, oactive, negated, opcode, *intptr, value, value2, cmdline = 0;
@@ -1113,8 +1116,9 @@ parse_time:
 		goto parse_string;
 
 	case oPubkeyAuthentication:
+		multistate_ptr = multistate_pubkey_auth;
 		intptr = &options->pubkey_authentication;
-		goto parse_flag;
+		goto parse_multistate;
 
 	case oHostbasedAuthentication:
 		intptr = &options->hostbased_authentication;
@@ -1585,9 +1589,8 @@ parse_pubkey_algos:
 		}
 		while ((arg = argv_next(&ac, &av)) != NULL) {
 			arg2 = xstrdup(arg);
-			ch = '\0';
-			p = hpdelim2(&arg, &ch);
-			if (p == NULL || ch == '/') {
+			p = hpdelim(&arg);
+			if (p == NULL) {
 				fatal("%s line %d: missing host in %s",
 				    filename, linenum,
 				    lookup_opcode_name(opcode));
@@ -1739,20 +1742,10 @@ parse_pubkey_algos:
 				/* Removing an env var */
 				rm_env(options, arg, filename, linenum);
 				continue;
-			} else {
-				/* Adding an env var */
-				if (options->num_send_env >= INT_MAX) {
-					error("%s line %d: too many send env.",
-					    filename, linenum);
-					goto out;
-				}
-				options->send_env = xrecallocarray(
-				    options->send_env, options->num_send_env,
-				    options->num_send_env + 1,
-				    sizeof(*options->send_env));
-				options->send_env[options->num_send_env++] =
-				    xstrdup(arg);
 			}
+			opt_array_append(filename, linenum,
+			    lookup_opcode_name(opcode),
+			    &options->send_env, &options->num_send_env, arg);
 		}
 		break;
 
@@ -1766,16 +1759,15 @@ parse_pubkey_algos:
 			}
 			if (!*activep || value != 0)
 				continue;
-			/* Adding a setenv var */
-			if (options->num_setenv >= INT_MAX) {
-				error("%s line %d: too many SetEnv.",
-				    filename, linenum);
-				goto out;
+			if (lookup_setenv_in_list(arg, options->setenv,
+			    options->num_setenv) != NULL) {
+				debug2("%s line %d: ignoring duplicate env "
+				    "name \"%.64s\"", filename, linenum, arg);
+				continue;
 			}
-			options->setenv = xrecallocarray(
-			    options->setenv, options->num_setenv,
-			    options->num_setenv + 1, sizeof(*options->setenv));
-			options->setenv[options->num_setenv++] = xstrdup(arg);
+			opt_array_append(filename, linenum,
+			    lookup_opcode_name(opcode),
+			    &options->setenv, &options->num_setenv, arg);
 		}
 		break;
 
@@ -1974,22 +1966,6 @@ parse_pubkey_algos:
 	case oForkAfterAuthentication:
 		intptr = &options->fork_after_authentication;
 		goto parse_flag;
-
-	case oVersionAddendum:
-		if (str == NULL)
-			fatal("%.200s line %d: Missing argument.", filename,
-			    linenum);
-		len = strspn(str, WHITESPACE);
-		if (*activep && options->version_addendum == NULL) {
-			if (strcasecmp(str + len, "none") == 0)
-				options->version_addendum = xstrdup("");
-			else if (strchr(str + len, '\r') != NULL)
-				fatal("%.200s line %d: Invalid argument",
-				    filename, linenum);
-			else
-				options->version_addendum = xstrdup(str + len);
-		}
-		return 0;
 
 	case oIgnoreUnknown:
 		charptr = &options->ignored_unknown;
@@ -2209,6 +2185,10 @@ parse_pubkey_algos:
 			*charptr = xstrdup(arg);
 		break;
 
+	case oRequiredRSASize:
+		intptr = &options->required_rsa_size;
+		goto parse_int;
+
 	case oDeprecated:
 		debug("%s line %d: Deprecated option \"%s\"",
 		    filename, linenum, keyword);
@@ -2345,7 +2325,6 @@ void
 initialize_options(Options * options)
 {
 	memset(options, 'X', sizeof(*options));
-	options->version_addendum = NULL;
 	options->forward_agent = -1;
 	options->forward_agent_sock_path = NULL;
 	options->forward_x11 = -1;
@@ -2457,6 +2436,7 @@ initialize_options(Options * options)
 	options->hostbased_accepted_algos = NULL;
 	options->pubkey_accepted_algos = NULL;
 	options->known_hosts_command = NULL;
+	options->required_rsa_size = -1;
 }
 
 /*
@@ -2515,7 +2495,7 @@ fill_default_options(Options * options)
 	if (options->fwd_opts.streamlocal_bind_unlink == -1)
 		options->fwd_opts.streamlocal_bind_unlink = 0;
 	if (options->pubkey_authentication == -1)
-		options->pubkey_authentication = 1;
+		options->pubkey_authentication = SSH_PUBKEY_AUTH_ALL;
 	if (options->gss_authentication == -1)
 		options->gss_authentication = 0;
 	if (options->gss_deleg_creds == -1)
@@ -2551,7 +2531,6 @@ fill_default_options(Options * options)
 	}
 	if (options->num_identity_files == 0) {
 		add_identity_file(options, "~/", _PATH_SSH_CLIENT_ID_RSA, 0);
-		add_identity_file(options, "~/", _PATH_SSH_CLIENT_ID_DSA, 0);
 #ifdef OPENSSL_HAS_ECC
 		add_identity_file(options, "~/", _PATH_SSH_CLIENT_ID_ECDSA, 0);
 		add_identity_file(options, "~/",
@@ -2562,6 +2541,7 @@ fill_default_options(Options * options)
 		add_identity_file(options, "~/",
 		    _PATH_SSH_CLIENT_ID_ED25519_SK, 0);
 		add_identity_file(options, "~/", _PATH_SSH_CLIENT_ID_XMSS, 0);
+		add_identity_file(options, "~/", _PATH_SSH_CLIENT_ID_DSA, 0);
 	}
 	if (options->escape_char == -1)
 		options->escape_char = '~';
@@ -2659,6 +2639,8 @@ fill_default_options(Options * options)
 	if (options->sk_provider == NULL)
 		options->sk_provider = xstrdup("$SSH_SK_PROVIDER");
 #endif
+	if (options->required_rsa_size == -1)
+		options->required_rsa_size = SSH_RSA_MINIMUM_MODULUS_SIZE;
 
 	/* Expand KEX name lists */
 	all_cipher = cipher_alg_list(',', 0);
@@ -2723,8 +2705,6 @@ fill_default_options(Options * options)
 	/* options->hostname will be set in the main program if appropriate */
 	/* options->host_key_alias should not be set by default */
 	/* options->preferred_authentications will be set in ssh */
-	if (options->version_addendum == NULL)
-		options->version_addendum = xstrdup(SSH_VERSION_FREEBSD);
 
 	/* success */
 	ret = 0;
@@ -2801,9 +2781,9 @@ free_options(Options *o)
 	}
 	free(o->remote_forwards);
 	free(o->stdio_forward_host);
-	FREE_ARRAY(int, o->num_send_env, o->send_env);
+	FREE_ARRAY(u_int, o->num_send_env, o->send_env);
 	free(o->send_env);
-	FREE_ARRAY(int, o->num_setenv, o->setenv);
+	FREE_ARRAY(u_int, o->num_setenv, o->setenv);
 	free(o->setenv);
 	free(o->control_path);
 	free(o->local_command);
@@ -3173,6 +3153,8 @@ fmt_intarg(OpCodes code, int val)
 		return fmt_multistate_int(val, multistate_canonicalizehostname);
 	case oAddKeysToAgent:
 		return fmt_multistate_int(val, multistate_yesnoaskconfirm);
+	case oPubkeyAuthentication:
+		return fmt_multistate_int(val, multistate_pubkey_auth);
 	case oFingerprintHash:
 		return ssh_digest_alg_name(val);
 	default:
@@ -3348,6 +3330,7 @@ dump_client_config(Options *o, const char *host)
 	dump_cfg_int(oNumberOfPasswordPrompts, o->number_of_password_prompts);
 	dump_cfg_int(oServerAliveCountMax, o->server_alive_count_max);
 	dump_cfg_int(oServerAliveInterval, o->server_alive_interval);
+	dump_cfg_int(oRequiredRSASize, o->required_rsa_size);
 
 	/* String options */
 	dump_cfg_string(oBindAddress, o->bind_address);

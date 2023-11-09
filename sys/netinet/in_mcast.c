@@ -113,8 +113,6 @@ MTX_SYSINIT(in_multi_free_mtx, &in_multi_free_mtx, "in_multi_free_mtx", MTX_DEF)
 struct sx in_multi_sx;
 SX_SYSINIT(in_multi_sx, &in_multi_sx, "in_multi_sx");
 
-int ifma_restart;
-
 /*
  * Functions with non-static linkage defined in this file should be
  * declared in in_var.h:
@@ -282,7 +280,6 @@ inm_disconnect(struct in_multi *inm)
 			}
 			MCDPRINTF("removed ll_ifma: %p from %s\n", ll_ifma, ifp->if_xname);
 			if_freemulti(ll_ifma);
-			ifma_restart = true;
 		}
 	}
 }
@@ -369,17 +366,14 @@ inm_lookup_locked(struct ifnet *ifp, const struct in_addr ina)
 	IN_MULTI_LIST_LOCK_ASSERT();
 	IF_ADDR_LOCK_ASSERT(ifp);
 
-	inm = NULL;
 	CK_STAILQ_FOREACH(ifma, &((ifp)->if_multiaddrs), ifma_link) {
-		if (ifma->ifma_addr->sa_family != AF_INET ||
-			ifma->ifma_protospec == NULL)
+		inm = inm_ifmultiaddr_get_inm(ifma);
+		if (inm == NULL)
 			continue;
-		inm = (struct in_multi *)ifma->ifma_protospec;
 		if (inm->inm_addr.s_addr == ina.s_addr)
-			break;
-		inm = NULL;
+			return (inm);
 	}
-	return (inm);
+	return (NULL);
 }
 
 /*
@@ -1751,13 +1745,9 @@ inp_getmoptions(struct inpcb *inp, struct sockopt *sopt)
 
 	INP_WLOCK(inp);
 	imo = inp->inp_moptions;
-	/*
-	 * If socket is neither of type SOCK_RAW or SOCK_DGRAM,
-	 * or is a divert socket, reject it.
-	 */
-	if (inp->inp_socket->so_proto->pr_protocol == IPPROTO_DIVERT ||
-	    (inp->inp_socket->so_proto->pr_type != SOCK_RAW &&
-	    inp->inp_socket->so_proto->pr_type != SOCK_DGRAM)) {
+	/* If socket is neither of type SOCK_RAW or SOCK_DGRAM reject it. */
+	if (inp->inp_socket->so_proto->pr_type != SOCK_RAW &&
+	    inp->inp_socket->so_proto->pr_type != SOCK_DGRAM) {
 		INP_WUNLOCK(inp);
 		return (EOPNOTSUPP);
 	}
@@ -2717,13 +2707,9 @@ inp_setmoptions(struct inpcb *inp, struct sockopt *sopt)
 
 	error = 0;
 
-	/*
-	 * If socket is neither of type SOCK_RAW or SOCK_DGRAM,
-	 * or is a divert socket, reject it.
-	 */
-	if (inp->inp_socket->so_proto->pr_protocol == IPPROTO_DIVERT ||
-	    (inp->inp_socket->so_proto->pr_type != SOCK_RAW &&
-	     inp->inp_socket->so_proto->pr_type != SOCK_DGRAM))
+	/* If socket is neither of type SOCK_RAW or SOCK_DGRAM, reject it. */
+	if (inp->inp_socket->so_proto->pr_type != SOCK_RAW &&
+	     inp->inp_socket->so_proto->pr_type != SOCK_DGRAM)
 		return (EOPNOTSUPP);
 
 	switch (sopt->sopt_name) {
@@ -2909,10 +2895,9 @@ sysctl_ip_mcast_filters(SYSCTL_HANDLER_ARGS)
 	IN_MULTI_LIST_LOCK();
 
 	CK_STAILQ_FOREACH(ifma, &ifp->if_multiaddrs, ifma_link) {
-		if (ifma->ifma_addr->sa_family != AF_INET ||
-		    ifma->ifma_protospec == NULL)
+		inm = inm_ifmultiaddr_get_inm(ifma);
+		if (inm == NULL)
 			continue;
-		inm = (struct in_multi *)ifma->ifma_protospec;
 		if (!in_hosteq(inm->inm_addr, group))
 			continue;
 		fmode = inm->inm_st[1].iss_fmode;

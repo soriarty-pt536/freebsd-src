@@ -8,6 +8,9 @@
 PACKAGE=runtime
 CLEANFILES= osreldate.h version
 SUBDIR= arpa protocols rpcsvc rpc xlocale
+.if ${MACHINE_CPUARCH} == "amd64"
+SUBDIR+=	i386
+.endif
 SUBDIR_PARALLEL=
 INCS=	a.out.h ar.h assert.h bitstring.h complex.h cpio.h _ctype.h ctype.h \
 	db.h \
@@ -40,24 +43,25 @@ LHDRS=	aio.h errno.h fcntl.h linker_set.h poll.h stdatomic.h stdint.h \
 	syslog.h ucontext.h
 
 LDIRS=	geom net net80211 netgraph netinet netinet6 \
-	netipsec netsmb nfs nfsclient nfsserver sys vm
+	netipsec netlink netsmb nfs nfsclient nfsserver sys vm
 
 LSUBDIRS=	dev/acpica dev/agp dev/ciss dev/filemon dev/firewire \
 	dev/hwpmc dev/hyperv \
 	dev/ic dev/iicbus dev/io dev/mfi dev/mmc dev/nvme \
 	dev/ofw dev/pbio dev/pci ${_dev_powermac_nvram} dev/ppbus dev/pwm \
-	dev/smbus dev/speaker dev/tcp_log dev/veriexec dev/vkbd \
+	dev/smbus dev/speaker dev/tcp_log dev/veriexec dev/vkbd dev/wg \
 	fs/devfs fs/fdescfs fs/msdosfs fs/nfs fs/nullfs \
 	fs/procfs fs/smbfs fs/udf fs/unionfs \
 	geom/cache geom/concat geom/eli geom/gate geom/journal geom/label \
 	geom/mirror geom/mountver geom/multipath geom/nop \
-	geom/raid geom/raid3 geom/shsec geom/stripe geom/virstor \
+	geom/raid geom/raid3 geom/shsec geom/stripe geom/union geom/virstor \
 	net/altq \
 	net/route \
 	netgraph/atm netgraph/netflow \
 	netinet/cc \
 	netinet/netdump \
 	netinet/tcp_stacks \
+	netlink/route \
 	security/mac_biba security/mac_bsdextended security/mac_lomac \
 	security/mac_mls security/mac_partition \
 	security/mac_veriexec \
@@ -221,6 +225,10 @@ NVPAIRDIR=	${INCLUDEDIR}/sys
 MLX5=		mlx5io.h
 MLX5DIR=	${INCLUDEDIR}/dev/mlx5
 
+.PATH: ${SRCTOP}/sys/dev/wg
+WG=		if_wg.h
+WGDIR=		${INCLUDEDIR}/dev/wg
+
 INCSGROUPS=	INCS \
 		ACPICA \
 		AGP \
@@ -240,7 +248,8 @@ INCSGROUPS=	INCS \
 		RPC \
 		SECAUDIT \
 		TEKEN \
-		VERIEXEC
+		VERIEXEC \
+		WG
 
 .if ${MK_IPFILTER} != "no"
 INCSGROUPS+=	IPFILTER
@@ -338,6 +347,10 @@ compat:
 	mtree -deU ${NO_ROOT:D-W} ${MTREE_FOLLOWS_SYMLINKS} \
 	    -f ${SRCTOP}/etc/mtree/BSD.include.dist \
 	    -p ${SDESTDIR}${INCLUDEDIR} > /dev/null
+.if ${MACHINE_CPUARCH} == "amd64"
+	${INSTALL} -d ${TAG_ARGS} -o ${BINOWN} -g ${BINGRP} -m 755 \
+	    ${SDESTDIR}${INCLUDEDIR}/i386
+.endif
 
 copies: .PHONY .META
 	cd ${SDESTDIR}${INCLUDEDIR}; find ${LDIRS} ${LSUBDIRS} ${LSUBSUBDIRS} crypto \

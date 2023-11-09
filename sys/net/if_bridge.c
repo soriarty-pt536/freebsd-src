@@ -197,7 +197,7 @@ extern void	nd6_setmtu(struct ifnet *);
  *  - BRIDGE_RT_LOCK, for any change to bridge_rtnodes
  *  - BRIDGE_LOCK, for any other change
  *
- * The BRIDGE_LOCK is a sleepable lock, because it is held accross ioctl()
+ * The BRIDGE_LOCK is a sleepable lock, because it is held across ioctl()
  * calls to bridge member interfaces and these ioctl()s can sleep.
  * The BRIDGE_RT_LOCK is a non-sleepable mutex, because it is sometimes
  * required while we're in NET_EPOCH and then we're not allowed to sleep.
@@ -286,8 +286,9 @@ int	bridge_rtable_prune_period = BRIDGE_RTABLE_PRUNE_PERIOD;
 VNET_DEFINE_STATIC(uma_zone_t, bridge_rtnode_zone);
 #define	V_bridge_rtnode_zone	VNET(bridge_rtnode_zone)
 
-static int	bridge_clone_create(struct if_clone *, int, caddr_t);
-static void	bridge_clone_destroy(struct ifnet *);
+static int	bridge_clone_create(struct if_clone *, char *, size_t,
+		    struct ifc_data *, struct ifnet **);
+static int	bridge_clone_destroy(struct if_clone *, struct ifnet *, uint32_t);
 
 static int	bridge_ioctl(struct ifnet *, u_long, caddr_t);
 static void	bridge_mutecaps(struct bridge_softc *);
@@ -414,7 +415,7 @@ SYSCTL_INT(_net_link_bridge, OID_AUTO, pfil_onlyip,
     "Only pass IP packets when pfil is enabled");
 
 /* run pfil hooks on the bridge interface */
-VNET_DEFINE_STATIC(int, pfil_bridge) = 1;
+VNET_DEFINE_STATIC(int, pfil_bridge) = 0;
 #define	V_pfil_bridge	VNET(pfil_bridge)
 SYSCTL_INT(_net_link_bridge, OID_AUTO, pfil_bridge,
     CTLFLAG_RWTUN | CTLFLAG_VNET, &VNET_NAME(pfil_bridge), 0,
@@ -432,7 +433,7 @@ SYSCTL_INT(_net_link_bridge, OID_AUTO, ipfw_arp,
     "Filter ARP packets through IPFW layer2");
 
 /* run pfil hooks on the member interface */
-VNET_DEFINE_STATIC(int, pfil_member) = 1;
+VNET_DEFINE_STATIC(int, pfil_member) = 0;
 #define	V_pfil_member	VNET(pfil_member)
 SYSCTL_INT(_net_link_bridge, OID_AUTO, pfil_member,
     CTLFLAG_RWTUN | CTLFLAG_VNET, &VNET_NAME(pfil_member), 0,
@@ -585,8 +586,13 @@ vnet_bridge_init(const void *unused __unused)
 	    UMA_ALIGN_PTR, 0);
 	BRIDGE_LIST_LOCK_INIT();
 	LIST_INIT(&V_bridge_list);
-	V_bridge_cloner = if_clone_simple(bridge_name,
-	    bridge_clone_create, bridge_clone_destroy, 0);
+
+	struct if_clone_addreq req = {
+		.create_f = bridge_clone_create,
+		.destroy_f = bridge_clone_destroy,
+		.flags = IFC_F_AUTOUNIT,
+	};
+	V_bridge_cloner = ifc_attach_cloner(bridge_name, &req);
 }
 VNET_SYSINIT(vnet_bridge_init, SI_SUB_PROTO_IFATTACHDOMAIN, SI_ORDER_ANY,
     vnet_bridge_init, NULL);
@@ -595,12 +601,12 @@ static void
 vnet_bridge_uninit(const void *unused __unused)
 {
 
-	if_clone_detach(V_bridge_cloner);
+	ifc_detach_cloner(V_bridge_cloner);
 	V_bridge_cloner = NULL;
 	BRIDGE_LIST_LOCK_DESTROY();
 
 	/* Callbacks may use the UMA zone. */
-	epoch_drain_callbacks(net_epoch_preempt);
+	NET_EPOCH_DRAIN_CALLBACKS();
 
 	uma_zdestroy(V_bridge_rtnode_zone);
 }
@@ -702,7 +708,8 @@ bridge_reassign(struct ifnet *ifp, struct vnet *newvnet, char *arg)
  *	Create a new bridge instance.
  */
 static int
-bridge_clone_create(struct if_clone *ifc, int unit, caddr_t params)
+bridge_clone_create(struct if_clone *ifc, char *name, size_t len,
+    struct ifc_data *ifd, struct ifnet **ifpp)
 {
 	struct bridge_softc *sc;
 	struct ifnet *ifp;
@@ -727,7 +734,7 @@ bridge_clone_create(struct if_clone *ifc, int unit, caddr_t params)
 	CK_LIST_INIT(&sc->sc_spanlist);
 
 	ifp->if_softc = sc;
-	if_initname(ifp, bridge_name, unit);
+	if_initname(ifp, bridge_name, ifd->unit);
 	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
 	ifp->if_ioctl = bridge_ioctl;
 #ifdef ALTQ
@@ -757,6 +764,7 @@ bridge_clone_create(struct if_clone *ifc, int unit, caddr_t params)
 	BRIDGE_LIST_LOCK();
 	LIST_INSERT_HEAD(&V_bridge_list, sc, sc_list);
 	BRIDGE_LIST_UNLOCK();
+	*ifpp = ifp;
 
 	return (0);
 }
@@ -777,8 +785,8 @@ bridge_clone_destroy_cb(struct epoch_context *ctx)
  *
  *	Destroy a bridge instance.
  */
-static void
-bridge_clone_destroy(struct ifnet *ifp)
+static int
+bridge_clone_destroy(struct if_clone *ifc, struct ifnet *ifp, uint32_t flags)
 {
 	struct bridge_softc *sc = ifp->if_softc;
 	struct bridge_iflist *bif;
@@ -819,6 +827,8 @@ bridge_clone_destroy(struct ifnet *ifp)
 	if_free(ifp);
 
 	NET_EPOCH_CALL(bridge_clone_destroy_cb, &sc->sc_epoch_ctx);
+
+	return (0);
 }
 
 /*
@@ -1266,9 +1276,21 @@ bridge_ioctl_add(struct bridge_softc *sc, void *arg)
 	if (CK_LIST_EMPTY(&sc->sc_iflist))
 		sc->sc_ifp->if_mtu = ifs->if_mtu;
 	else if (sc->sc_ifp->if_mtu != ifs->if_mtu) {
-		if_printf(sc->sc_ifp, "invalid MTU: %u(%s) != %u\n",
-		    ifs->if_mtu, ifs->if_xname, sc->sc_ifp->if_mtu);
-		return (EINVAL);
+		struct ifreq ifr;
+
+		snprintf(ifr.ifr_name, sizeof(ifr.ifr_name), "%s",
+		    ifs->if_xname);
+		ifr.ifr_mtu = sc->sc_ifp->if_mtu;
+
+		error = (*ifs->if_ioctl)(ifs,
+		    SIOCSIFMTU, (caddr_t)&ifr);
+		if (error != 0) {
+			log(LOG_NOTICE, "%s: invalid MTU: %u for"
+			    " new member %s\n", sc->sc_ifp->if_xname,
+			    ifr.ifr_mtu,
+			    ifs->if_xname);
+			return (EINVAL);
+		}
 	}
 
 	bif = malloc(sizeof(*bif), M_DEVBUF, M_NOWAIT|M_ZERO);
@@ -2176,7 +2198,7 @@ bridge_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *sa,
 				used = 1;
 				mc = m;
 			} else {
-				mc = m_copypacket(m, M_NOWAIT);
+				mc = m_dup(m, M_NOWAIT);
 				if (mc == NULL) {
 					if_inc_counter(bifp, IFCOUNTER_OERRORS, 1);
 					continue;
@@ -2737,7 +2759,7 @@ bridge_span(struct bridge_softc *sc, struct mbuf *m)
 		if ((dst_if->if_drv_flags & IFF_DRV_RUNNING) == 0)
 			continue;
 
-		mc = m_copypacket(m, M_NOWAIT);
+		mc = m_dup(m, M_NOWAIT);
 		if (mc == NULL) {
 			if_inc_counter(sc->sc_ifp, IFCOUNTER_OERRORS, 1);
 			continue;

@@ -3360,30 +3360,19 @@ dtrace_dif_variable(dtrace_mstate_t *mstate, dtrace_state_t *state, uint64_t v,
 
 		return (mstate->dtms_arg[ndx]);
 
-#ifdef illumos
-	case DIF_VAR_UREGS: {
-		klwp_t *lwp;
-
-		if (!dtrace_priv_proc(state))
-			return (0);
-
-		if ((lwp = curthread->t_lwp) == NULL) {
-			DTRACE_CPUFLAG_SET(CPU_DTRACE_BADADDR);
-			cpu_core[curcpu].cpuc_dtrace_illval = NULL;
-			return (0);
-		}
-
-		return (dtrace_getreg(lwp->lwp_regs, ndx));
-		return (0);
-	}
-#else
+	case DIF_VAR_REGS:
 	case DIF_VAR_UREGS: {
 		struct trapframe *tframe;
 
 		if (!dtrace_priv_proc(state))
 			return (0);
 
-		if ((tframe = curthread->td_frame) == NULL) {
+		if (v == DIF_VAR_REGS)
+			tframe = curthread->t_dtrace_trapframe;
+		else
+			tframe = curthread->td_frame;
+
+		if (tframe == NULL) {
 			DTRACE_CPUFLAG_SET(CPU_DTRACE_BADADDR);
 			cpu_core[curcpu].cpuc_dtrace_illval = 0;
 			return (0);
@@ -3391,7 +3380,6 @@ dtrace_dif_variable(dtrace_mstate_t *mstate, dtrace_state_t *state, uint64_t v,
 
 		return (dtrace_getreg(tframe, ndx));
 	}
-#endif
 
 	case DIF_VAR_CURTHREAD:
 		if (!dtrace_priv_proc(state))
@@ -5664,7 +5652,10 @@ dtrace_dif_subr(uint_t subr, uint_t rd, uint64_t *regs,
 		}
 		fdp = curproc->p_fd;
 		FILEDESC_SLOCK(fdp);
-		fp = fget_locked(fdp, fd);
+		/*
+		 * XXXMJG this looks broken as no ref is taken.
+		 */
+		fp = fget_noref(fdp, fd);
 		mstate->dtms_getf = fp;
 		regs[rd] = (uintptr_t)fp;
 		FILEDESC_SUNLOCK(fdp);
@@ -7335,7 +7326,7 @@ dtrace_probe(dtrace_id_t id, uintptr_t arg0, uintptr_t arg1,
 	volatile uint16_t *flags;
 	hrtime_t now;
 
-	if (panicstr != NULL)
+	if (KERNEL_PANICKED())
 		return;
 
 #ifdef illumos
@@ -7366,7 +7357,7 @@ dtrace_probe(dtrace_id_t id, uintptr_t arg0, uintptr_t arg1,
 #ifdef illumos
 	if (panic_quiesce) {
 #else
-	if (panicstr != NULL) {
+	if (KERNEL_PANICKED()) {
 #endif
 		/*
 		 * We don't trace anything if we're panicking.
@@ -17013,7 +17004,7 @@ dtrace_toxrange_add(uintptr_t base, uintptr_t limit)
 }
 
 static void
-dtrace_getf_barrier()
+dtrace_getf_barrier(void)
 {
 #ifdef illumos
 	/*

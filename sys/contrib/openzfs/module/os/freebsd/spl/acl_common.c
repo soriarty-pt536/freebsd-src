@@ -6,7 +6,7 @@
  * You may not use this file except in compliance with the License.
  *
  * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
- * or http://www.opensolaris.org/os/licensing.
+ * or https://opensource.org/licenses/CDDL-1.0.
  * See the License for the specific language governing permissions
  * and limitations under the License.
  *
@@ -37,7 +37,6 @@
 #include <errno.h>
 #include <stdlib.h>
 #include <stddef.h>
-#include <strings.h>
 #include <unistd.h>
 #include <assert.h>
 #include <grp.h>
@@ -738,7 +737,7 @@ out:
 static void
 acevals_init(acevals_t *vals, uid_t key)
 {
-	bzero(vals, sizeof (*vals));
+	memset(vals, 0, sizeof (*vals));
 	vals->allowed = ACE_MASK_UNDEFINED;
 	vals->denied = ACE_MASK_UNDEFINED;
 	vals->mask = ACE_MASK_UNDEFINED;

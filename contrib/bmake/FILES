@@ -158,8 +158,6 @@ unit-tests/cond-token-var.exp
 unit-tests/cond-token-var.mk
 unit-tests/cond-undef-lint.exp
 unit-tests/cond-undef-lint.mk
-unit-tests/cond1.exp
-unit-tests/cond1.mk
 unit-tests/counter-append.exp
 unit-tests/counter-append.mk
 unit-tests/counter.exp
@@ -274,10 +272,14 @@ unit-tests/deptgt-path.exp
 unit-tests/deptgt-path.mk
 unit-tests/deptgt-phony.exp
 unit-tests/deptgt-phony.mk
+unit-tests/deptgt-posix.exp
+unit-tests/deptgt-posix.mk
 unit-tests/deptgt-precious.exp
 unit-tests/deptgt-precious.mk
 unit-tests/deptgt-shell.exp
 unit-tests/deptgt-shell.mk
+unit-tests/deptgt-silent-jobs.exp
+unit-tests/deptgt-silent-jobs.mk
 unit-tests/deptgt-silent.exp
 unit-tests/deptgt-silent.mk
 unit-tests/deptgt-stale.exp
@@ -320,6 +322,8 @@ unit-tests/directive-export-literal.exp
 unit-tests/directive-export-literal.mk
 unit-tests/directive-export.exp
 unit-tests/directive-export.mk
+unit-tests/directive-for-empty.exp
+unit-tests/directive-for-empty.mk
 unit-tests/directive-for-errors.exp
 unit-tests/directive-for-errors.mk
 unit-tests/directive-for-escape.exp
@@ -502,6 +506,8 @@ unit-tests/opt-jobs-no-action.exp
 unit-tests/opt-jobs-no-action.mk
 unit-tests/opt-jobs.exp
 unit-tests/opt-jobs.mk
+unit-tests/opt-keep-going-indirect.exp
+unit-tests/opt-keep-going-indirect.mk
 unit-tests/opt-keep-going-multiple.exp
 unit-tests/opt-keep-going-multiple.mk
 unit-tests/opt-keep-going.exp
@@ -858,8 +864,6 @@ unit-tests/varparse-mod.exp
 unit-tests/varparse-mod.mk
 unit-tests/varparse-undef-partial.exp
 unit-tests/varparse-undef-partial.mk
-unit-tests/varquote.exp
-unit-tests/varquote.mk
 util.c
 var.c
 wait.h

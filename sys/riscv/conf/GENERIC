@@ -33,6 +33,8 @@ options 	TCP_HHOOK		# hhook(9) framework for TCP
 options 	IPSEC_SUPPORT		# Allow kldload of ipsec and tcpmd5
 options		ROUTE_MPATH		# Multipath routing support
 options 	TCP_OFFLOAD		# TCP offload
+options 	TCP_BLACKBOX		# Enhanced TCP event logging
+options 	TCP_RFC7413		# TCP Fast Open
 options 	SCTP_SUPPORT		# Allow kldload of SCTP
 options 	FFS			# Berkeley Fast Filesystem
 options 	SOFTUPDATES		# Enable FFS soft updates support
@@ -49,7 +51,6 @@ options 	CD9660			# ISO 9660 Filesystem
 options 	PROCFS			# Process filesystem (requires PSEUDOFS)
 options 	PSEUDOFS		# Pseudo-filesystem framework
 options 	TMPFS			# Efficient memory filesystem
-options 	GEOM_PART_GPT		# GUID Partition Tables.
 options 	GEOM_RAID		# Soft RAID functionality.
 options 	GEOM_LABEL		# Provides labelization
 options 	COMPAT_FREEBSD12	# Compatible with FreeBSD12
@@ -76,13 +77,11 @@ options 	RACCT			# Resource accounting framework
 options 	RACCT_DEFAULT_TO_DISABLED # Set kern.racct.enable=0 by default
 options 	RCTL			# Resource limits
 options 	SMP
-options 	INTRNG
 
 # RISC-V SBI console
 device		rcons
 
-# EXT_RESOURCES pseudo devices
-options 	EXT_RESOURCES
+# pseudo devices
 device		clk
 device		hwreset
 device		syscon
@@ -141,6 +140,7 @@ device		vt
 device		kbdmux
 
 # RTC
+device		da9063_rtc	# Dialog Semiconductor DA9063 RTC
 device		goldfish_rtc	# QEMU RTC
 
 # Ethernet drivers
@@ -158,6 +158,9 @@ device		gpio
 # SPI
 device		spibus
 device		spigen
+
+# Power management controllers
+device		da9063_pmic	# Dialog Semiconductor DA9063 PMIC
 
 # Uncomment for memory disk
 # options 	MD_ROOT
@@ -209,6 +212,10 @@ makeoptions	MODULES_EXTRA+="dtb/sifive"
 # I2C support
 device		iicbus		# Bus support, required for iicoc below.
 device		iicoc		# OpenCores I2C controller support
+
+# Allwinner device drivers
+device		aw_wdog		# Allwinner Watchdog
+files		"../allwinner/files.allwinner"
 
 # SiFive device drivers
 device		fu740_pci_dw

@@ -6,7 +6,7 @@
  * You may not use this file except in compliance with the License.
  *
  * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
- * or http://www.opensolaris.org/os/licensing.
+ * or https://opensource.org/licenses/CDDL-1.0.
  * See the License for the specific language governing permissions
  * and limitations under the License.
  *
@@ -83,14 +83,7 @@ extern "C" {
 
 /* AES key size definitions */
 #define	AES_MINBITS		128
-#define	AES_MINBYTES		((AES_MINBITS) >> 3)
 #define	AES_MAXBITS		256
-#define	AES_MAXBYTES		((AES_MAXBITS) >> 3)
-
-#define	AES_MIN_KEY_BYTES	((AES_MINBITS) >> 3)
-#define	AES_MAX_KEY_BYTES	((AES_MAXBITS) >> 3)
-#define	AES_192_KEY_BYTES	24
-#define	AES_IV_LEN		16
 
 /* AES key schedule may be implemented with 32- or 64-bit elements: */
 #define	AES_32BIT_KS		32

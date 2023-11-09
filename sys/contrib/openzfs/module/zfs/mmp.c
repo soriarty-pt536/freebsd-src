@@ -6,7 +6,7 @@
  * You may not use this file except in compliance with the License.
  *
  * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
- * or http://www.opensolaris.org/os/licensing.
+ * or https://opensource.org/licenses/CDDL-1.0.
  * See the License for the specific language governing permissions
  * and limitations under the License.
  *
@@ -186,8 +186,8 @@ uint_t zfs_multihost_import_intervals = MMP_DEFAULT_IMPORT_INTERVALS;
  */
 uint_t zfs_multihost_fail_intervals = MMP_DEFAULT_FAIL_INTERVALS;
 
-static void *const mmp_tag = "mmp_write_uberblock";
-static void mmp_thread(void *arg);
+static const void *const mmp_tag = "mmp_write_uberblock";
+static __attribute__((noreturn)) void mmp_thread(void *arg);
 
 void
 mmp_init(spa_t *spa)
@@ -224,7 +224,6 @@ mmp_thread_exit(mmp_thread_t *mmp, kthread_t **mpp, callb_cpr_t *cpr)
 	*mpp = NULL;
 	cv_broadcast(&mmp->mmp_thread_cv);
 	CALLB_CPR_EXIT(cpr);		/* drops &mmp->mmp_thread_lock */
-	thread_exit();
 }
 
 void
@@ -537,7 +536,7 @@ mmp_write_uberblock(spa_t *spa)
 	zio_nowait(zio);
 }
 
-static void
+static __attribute__((noreturn)) void
 mmp_thread(void *arg)
 {
 	spa_t *spa = (spa_t *)arg;
@@ -698,6 +697,8 @@ mmp_thread(void *arg)
 
 	mmp->mmp_zio_root = NULL;
 	mmp_thread_exit(mmp, &mmp->mmp_thread, &cpr);
+
+	thread_exit();
 }
 
 /*

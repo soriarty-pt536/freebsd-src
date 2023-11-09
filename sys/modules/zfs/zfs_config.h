@@ -42,8 +42,14 @@
 /* posix_acl has refcount_t */
 /* #undef HAVE_ACL_REFCOUNT */
 
+/* add_disk() returns int */
+/* #undef HAVE_ADD_DISK_RET */
+
 /* Define if host toolchain supports AES */
 #define HAVE_AES 1
+
+/* Define if you have [rt] */
+#define HAVE_AIO_H 1
 
 #ifdef __amd64__
 #ifndef RESCUE
@@ -82,14 +88,32 @@
 #define HAVE_AVX512VL 1
 #endif
 
+/* bdevname() is available */
+/* #undef HAVE_BDEVNAME */
+
 /* bdev_check_media_change() exists */
 /* #undef HAVE_BDEV_CHECK_MEDIA_CHANGE */
+
+/* bdev_*_io_acct() available */
+/* #undef HAVE_BDEV_IO_ACCT */
+
+/* bdev_kobj() exists */
+/* #undef HAVE_BDEV_KOBJ */
+
+/* bdev_max_discard_sectors() is available */
+/* #undef HAVE_BDEV_MAX_DISCARD_SECTORS */
+
+/* bdev_max_secure_erase_sectors() is available */
+/* #undef HAVE_BDEV_MAX_SECURE_ERASE_SECTORS */
 
 /* block_device_operations->submit_bio() returns void */
 /* #undef HAVE_BDEV_SUBMIT_BIO_RETURNS_VOID */
 
 /* bdev_whole() is available */
 /* #undef HAVE_BDEV_WHOLE */
+
+/* bio_alloc() takes 4 arguments */
+/* #undef HAVE_BIO_ALLOC_4ARG */
 
 /* bio->bi_bdev->bd_disk exists */
 /* #undef HAVE_BIO_BDEV_DISK */
@@ -124,6 +148,12 @@
 /* blkdev_get_by_path() handles ERESTARTSYS */
 /* #undef HAVE_BLKDEV_GET_ERESTARTSYS */
 
+/* blkdev_issue_discard() is available */
+/* #undef HAVE_BLKDEV_ISSUE_DISCARD */
+
+/* blkdev_issue_secure_erase() is available */
+/* #undef HAVE_BLKDEV_ISSUE_SECURE_ERASE */
+
 /* blkdev_reread_part() exists */
 /* #undef HAVE_BLKDEV_REREAD_PART */
 
@@ -142,8 +172,17 @@
 /* blk_alloc_queue_rh() expects request function */
 /* #undef HAVE_BLK_ALLOC_QUEUE_REQUEST_FN_RH */
 
+/* blk_cleanup_disk() exists */
+/* #undef HAVE_BLK_CLEANUP_DISK */
+
+/* block multiqueue is available */
+/* #undef HAVE_BLK_MQ */
+
 /* blk queue backing_dev_info is dynamic */
 /* #undef HAVE_BLK_QUEUE_BDI_DYNAMIC */
+
+/* blk_queue_discard() is available */
+/* #undef HAVE_BLK_QUEUE_DISCARD */
 
 /* blk_queue_flag_clear() exists */
 /* #undef HAVE_BLK_QUEUE_FLAG_CLEAR */
@@ -215,6 +254,9 @@
 /* DECLARE_EVENT_CLASS() is available */
 /* #undef HAVE_DECLARE_EVENT_CLASS */
 
+/* dequeue_signal() takes 4 arguments */
+/* #undef HAVE_DEQUEUE_SIGNAL_4ARG */
+
 /* lookup_bdev() wants dev_t arg */
 /* #undef HAVE_DEVT_LOOKUP_BDEV */
 
@@ -245,11 +287,20 @@
 /* sops->evict_inode() exists */
 /* #undef HAVE_EVICT_INODE */
 
+/* FALLOC_FL_ZERO_RANGE is defined */
+/* #undef HAVE_FALLOC_FL_ZERO_RANGE */
+
+/* fault_in_iov_iter_readable() is available */
+/* #undef HAVE_FAULT_IN_IOV_ITER_READABLE */
+
 /* fops->aio_fsync() exists */
 /* #undef HAVE_FILE_AIO_FSYNC */
 
 /* file_dentry() is available */
 /* #undef HAVE_FILE_DENTRY */
+
+/* fops->fadvise() exists */
+/* #undef HAVE_FILE_FADVISE */
 
 /* file_inode() is available */
 /* #undef HAVE_FILE_INODE */
@@ -265,6 +316,9 @@
 
 /* fops->fsync() without dentry */
 /* #undef HAVE_FSYNC_WITHOUT_DENTRY */
+
+/* yes */
+/* #undef HAVE_GENERIC_FADVISE */
 
 /* generic_fillattr requires struct user_namespace* */
 /* #undef HAVE_GENERIC_FILLATTR_USERNS */
@@ -308,6 +362,9 @@
 /* Define if you have the iconv() function and it works. */
 #define HAVE_ICONV 1
 
+/* Define if compiler supports -Winfinite-recursion */
+/* #undef HAVE_INFINITE_RECURSION */
+
 /* yes */
 /* #undef HAVE_INODE_LOCK_SHARED */
 
@@ -343,6 +400,9 @@
 
 /* iops->mknod() takes struct user_namespace* */
 /* #undef HAVE_IOPS_MKNOD_USERNS */
+
+/* iops->permission() takes struct user_namespace* */
+/* #undef HAVE_IOPS_PERMISSION_USERNS */
 
 /* iops->rename() takes struct user_namespace* */
 /* #undef HAVE_IOPS_RENAME_USERNS */
@@ -383,8 +443,8 @@
 /* kernel fpu internal */
 /* #undef HAVE_KERNEL_FPU_INTERNAL */
 
-/* kernel has asm/fpu/xcr.h */
-/* #undef HAVE_KERNEL_FPU_XCR_HEADER */
+/* kernel has asm/fpu/internal.h */
+/* #undef HAVE_KERNEL_FPU_INTERNAL_HEADER */
 
 /* uncached_acl_sentinel() exists */
 /* #undef HAVE_KERNEL_GET_ACL_HANDLE_CACHE */
@@ -461,9 +521,6 @@
 /* Noting that make_request_fn() returns void */
 /* #undef HAVE_MAKE_REQUEST_FN_RET_VOID */
 
-/* Define to 1 if you have the <memory.h> header file. */
-#define HAVE_MEMORY_H 1
-
 /* iops->mkdir() takes umode_t */
 /* #undef HAVE_MKDIR_UMODE_T */
 
@@ -481,6 +538,9 @@
 
 /* folio_wait_bit() exists */
 /* #undef HAVE_PAGEMAP_FOLIO_WAIT_BIT */
+
+/* part_to_dev() exists */
+/* #undef HAVE_PART_TO_DEV */
 
 /* iops->getattr() takes a path */
 /* #undef HAVE_PATH_IOPS_GETATTR */
@@ -526,6 +586,9 @@
 
 /* qat is enabled and existed */
 /* #undef HAVE_QAT */
+
+/* register_shrinker is vararg */
+/* #undef HAVE_REGISTER_SHRINKER_VARARG */
 
 /* iops->rename() wants flags */
 /* #undef HAVE_RENAME_WANTS_FLAGS */
@@ -596,7 +659,7 @@
 /* new shrinker callback wants 2 args */
 /* #undef HAVE_SINGLE_SHRINKER_CALLBACK */
 
-/* ->count_objects exists */
+/* cs->count_objects exists */
 /* #undef HAVE_SPLIT_SHRINKER_CALLBACK */
 
 #if defined(__amd64__) || defined(__i386__)
@@ -628,6 +691,9 @@
 /* Define to 1 if you have the <stdint.h> header file. */
 #define HAVE_STDINT_H 1
 
+/* Define to 1 if you have the <stdio.h> header file. */
+#define HAVE_STDIO_H 1
+
 /* Define to 1 if you have the <stdlib.h> header file. */
 #define HAVE_STDLIB_H 1
 
@@ -651,6 +717,9 @@
 
 /* super_block->s_user_ns exists */
 /* #undef HAVE_SUPER_USER_NS */
+
+/* struct kobj_type has default_groups */
+/* #undef HAVE_SYSFS_DEFAULT_GROUPS */
 
 /* Define to 1 if you have the <sys/stat.h> header file. */
 #define HAVE_SYS_STAT_H 1
@@ -682,6 +751,9 @@
 /* iops->getattr() takes struct user_namespace* */
 /* #undef HAVE_USERNS_IOPS_GETATTR */
 
+/* user_namespace->ns.inum exists */
+/* #undef HAVE_USER_NS_COMMON_INUM */
+
 /* iops->getattr() takes a vfsmount */
 /* #undef HAVE_VFSMOUNT_IOPS_GETATTR */
 
@@ -697,6 +769,9 @@
 /* aops->direct_IO() uses iov_iter with rw and offset */
 /* #undef HAVE_VFS_DIRECT_IO_ITER_RW_OFFSET */
 
+/* filemap_dirty_folio exists */
+/* #undef HAVE_VFS_FILEMAP_DIRTY_FOLIO */
+
 /* All required iov_iter interfaces are available */
 /* #undef HAVE_VFS_IOV_ITER */
 
@@ -708,6 +783,12 @@
 
 /* fops->readdir() is available */
 /* #undef HAVE_VFS_READDIR */
+
+/* address_space_operations->readpages exists */
+/* #undef HAVE_VFS_READPAGES */
+
+/* read_folio exists */
+/* #undef HAVE_VFS_READ_FOLIO */
 
 /* fops->read/write_iter() are available */
 /* #undef HAVE_VFS_RW_ITERATE */
@@ -732,6 +813,9 @@
 
 /* xattr_handler->get() wants both dentry and inode */
 /* #undef HAVE_XATTR_GET_DENTRY_INODE */
+
+/* xattr_handler->get() wants dentry and inode and flags */
+/* #undef HAVE_XATTR_GET_DENTRY_INODE_FLAGS */
 
 /* xattr_handler->get() wants xattr_handler */
 /* #undef HAVE_XATTR_GET_HANDLER */
@@ -759,6 +843,18 @@
 
 /* xattr_handler->set() takes user_namespace */
 /* #undef HAVE_XATTR_SET_USERNS */
+
+/* Define if host toolchain supports XSAVE */
+#define HAVE_XSAVE 1
+
+/* Define if host toolchain supports XSAVEOPT */
+#define HAVE_XSAVEOPT 1
+
+/* Define if host toolchain supports XSAVES */
+#define HAVE_XSAVES 1
+
+/* ZERO_PAGE() is GPL-only */
+/* #undef HAVE_ZERO_PAGE_GPL_ONLY */
 
 /* Define if you have [z] */
 #define HAVE_ZLIB 1
@@ -796,6 +892,9 @@
 /* struct shrink_control has nid */
 /* #undef SHRINK_CONTROL_HAS_NID */
 
+/* using complete_and_exit() instead */
+/* #undef SPL_KTHREAD_COMPLETE_AND_EXIT */
+
 /* Defined for legacy compatibility. */
 #define SPL_META_ALIAS ZFS_META_ALIAS
 
@@ -805,13 +904,18 @@
 /* Defined for legacy compatibility. */
 #define SPL_META_VERSION ZFS_META_VERSION
 
-/* True if ZFS is to be compiled for a FreeBSD system */
+/* pde_data() is PDE_DATA() */
+/* #undef SPL_PDE_DATA */
+
+/* Define to 1 if all of the C90 standard headers exist (not just the ones
+   required in a freestanding environment). This macro is provided for
+   backward compatibility; new code need not use it. */
 #define SYSTEM_FREEBSD 1
 
 /* True if ZFS is to be compiled for a Linux system */
 /* #undef SYSTEM_LINUX */
 
-/* zfs debugging enabled */
+/* Version number of package */
 /* #undef ZFS_DEBUG */
 
 /* /dev/zfs minor */
@@ -835,6 +939,12 @@
 /* enum zone_stat_item contains NR_INACTIVE_FILE */
 /* #undef ZFS_ENUM_ZONE_STAT_ITEM_NR_INACTIVE_FILE */
 
+/* GENHD_FL_EXT_DEVT flag is not available */
+/* #undef ZFS_GENHD_FL_EXT_DEVT */
+
+/* GENHD_FL_NO_PART_SCAN flag is available */
+/* #undef ZFS_GENHD_FL_NO_PART */
+
 /* global_node_page_state() exists */
 /* #undef ZFS_GLOBAL_NODE_PAGE_STATE */
 
@@ -845,7 +955,7 @@
 /* #undef ZFS_IS_GPL_COMPATIBLE */
 
 /* Define the project alias string. */
-#define ZFS_META_ALIAS "zfs-2.1.99-FreeBSD_g17b2ae0b2"
+#define ZFS_META_ALIAS "zfs-2.1.99-FreeBSD_gd62bafee9"
 
 /* Define the project author. */
 #define ZFS_META_AUTHOR "OpenZFS"
@@ -854,7 +964,7 @@
 /* #undef ZFS_META_DATA */
 
 /* Define the maximum compatible kernel version. */
-#define ZFS_META_KVER_MAX "5.15"
+#define ZFS_META_KVER_MAX "5.19"
 
 /* Define the minimum compatible kernel version. */
 #define ZFS_META_KVER_MIN "3.10"
@@ -875,11 +985,10 @@
 #define ZFS_META_NAME "zfs"
 
 /* Define the project release. */
-#define ZFS_META_RELEASE "FreeBSD_g17b2ae0b2"
+#define ZFS_META_RELEASE "FreeBSD_gd62bafee9"
 
 /* Define the project version. */
 #define ZFS_META_VERSION "2.1.99"
 
 /* count is located in percpu_ref.data */
 /* #undef ZFS_PERCPU_REF_COUNT_IN_DATA */
-

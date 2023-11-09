@@ -440,7 +440,7 @@ zyd_detach(device_t dev)
 {
 	struct zyd_softc *sc = device_get_softc(dev);
 	struct ieee80211com *ic = &sc->sc_ic;
-	unsigned int x;
+	unsigned x;
 
 	/*
 	 * Prevent further allocations from RX/TX data
@@ -2913,9 +2913,7 @@ static driver_t zyd_driver = {
 	.size = sizeof(struct zyd_softc)
 };
 
-static devclass_t zyd_devclass;
-
-DRIVER_MODULE(zyd, uhub, zyd_driver, zyd_devclass, NULL, 0);
+DRIVER_MODULE(zyd, uhub, zyd_driver, NULL, NULL);
 MODULE_DEPEND(zyd, usb, 1, 1, 1);
 MODULE_DEPEND(zyd, wlan, 1, 1, 1);
 MODULE_VERSION(zyd, 1);

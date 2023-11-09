@@ -84,6 +84,7 @@
 #ifdef INET6
 #include <netipsec/ipsec6.h>
 #endif
+#include <netipsec/ipsec_support.h>
 #include <netipsec/ah_var.h>
 #include <netipsec/esp_var.h>
 #include <netipsec/ipcomp_var.h>
@@ -1082,7 +1083,9 @@ ipsec_encap(struct mbuf **mp, struct secasindex *saidx)
 	struct ip6_hdr *ip6;
 #endif
 	struct ip *ip;
+#ifdef INET
 	int setdf;
+#endif
 	uint8_t itos, proto;
 
 	ip = mtod(*mp, struct ip *);
@@ -1110,7 +1113,6 @@ ipsec_encap(struct mbuf **mp, struct secasindex *saidx)
 		proto = IPPROTO_IPV6;
 		ip6 = mtod(*mp, struct ip6_hdr *);
 		itos = (ntohl(ip6->ip6_flow) >> 20) & 0xff;
-		setdf = V_ip4_ipsec_dfbit ? 1: 0;
 		/* scoped address handling */
 		in6_clearscope(&ip6->ip6_src);
 		in6_clearscope(&ip6->ip6_dst);

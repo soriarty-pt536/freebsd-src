@@ -6,7 +6,7 @@
  * You may not use this file except in compliance with the License.
  *
  * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
- * or http://www.opensolaris.org/os/licensing.
+ * or https://opensource.org/licenses/CDDL-1.0.
  * See the License for the specific language governing permissions
  * and limitations under the License.
  *
@@ -32,7 +32,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <strings.h>
 
 #include <libzfs.h>
 
@@ -175,7 +174,7 @@ zfs_add_sort_column(zfs_sort_column_t **sc, const char *name,
 	zfs_sort_column_t *col;
 	zfs_prop_t prop;
 
-	if ((prop = zfs_name_to_prop(name)) == ZPROP_INVAL &&
+	if ((prop = zfs_name_to_prop(name)) == ZPROP_USERPROP &&
 	    !zfs_prop_user(name))
 		return (-1);
 
@@ -183,7 +182,7 @@ zfs_add_sort_column(zfs_sort_column_t **sc, const char *name,
 
 	col->sc_prop = prop;
 	col->sc_reverse = reverse;
-	if (prop == ZPROP_INVAL) {
+	if (prop == ZPROP_USERPROP) {
 		col->sc_user_prop = safe_malloc(strlen(name) + 1);
 		(void) strcpy(col->sc_user_prop, name);
 	}
@@ -217,6 +216,13 @@ zfs_sort_only_by_name(const zfs_sort_column_t *sc)
 {
 	return (sc != NULL && sc->sc_next == NULL &&
 	    sc->sc_prop == ZFS_PROP_NAME);
+}
+
+int
+zfs_sort_only_by_createtxg(const zfs_sort_column_t *sc)
+{
+	return (sc != NULL && sc->sc_next == NULL &&
+	    sc->sc_prop == ZFS_PROP_CREATETXG);
 }
 
 static int
@@ -302,7 +308,7 @@ zfs_sort(const void *larg, const void *rarg, void *data)
 	for (psc = sc; psc != NULL; psc = psc->sc_next) {
 		char lbuf[ZFS_MAXPROPLEN], rbuf[ZFS_MAXPROPLEN];
 		char *lstr, *rstr;
-		uint64_t lnum, rnum;
+		uint64_t lnum = 0, rnum = 0;
 		boolean_t lvalid, rvalid;
 		int ret = 0;
 
@@ -312,7 +318,7 @@ zfs_sort(const void *larg, const void *rarg, void *data)
 		 * Otherwise, we compare 'lnum' and 'rnum'.
 		 */
 		lstr = rstr = NULL;
-		if (psc->sc_prop == ZPROP_INVAL) {
+		if (psc->sc_prop == ZPROP_USERPROP) {
 			nvlist_t *luser, *ruser;
 			nvlist_t *lval, *rval;
 
@@ -353,11 +359,9 @@ zfs_sort(const void *larg, const void *rarg, void *data)
 			    zfs_get_type(r), B_FALSE);
 
 			if (lvalid)
-				(void) zfs_prop_get_numeric(l, psc->sc_prop,
-				    &lnum, NULL, NULL, 0);
+				lnum = zfs_prop_get_int(l, psc->sc_prop);
 			if (rvalid)
-				(void) zfs_prop_get_numeric(r, psc->sc_prop,
-				    &rnum, NULL, NULL, 0);
+				rnum = zfs_prop_get_int(r, psc->sc_prop);
 		}
 
 		if (!lvalid && !rvalid)
@@ -453,23 +457,21 @@ zfs_for_each(int argc, char **argv, int flags, zfs_type_t types,
 		cb.cb_flags |= ZFS_ITER_RECURSE;
 		ret = zfs_iter_root(g_zfs, zfs_callback, &cb);
 	} else {
-		int i;
-		zfs_handle_t *zhp;
-		zfs_type_t argtype;
+		zfs_handle_t *zhp = NULL;
+		zfs_type_t argtype = types;
 
 		/*
 		 * If we're recursive, then we always allow filesystems as
 		 * arguments.  If we also are interested in snapshots or
 		 * bookmarks, then we can take volumes as well.
 		 */
-		argtype = types;
 		if (flags & ZFS_ITER_RECURSE) {
 			argtype |= ZFS_TYPE_FILESYSTEM;
 			if (types & (ZFS_TYPE_SNAPSHOT | ZFS_TYPE_BOOKMARK))
 				argtype |= ZFS_TYPE_VOLUME;
 		}
 
-		for (i = 0; i < argc; i++) {
+		for (int i = 0; i < argc; i++) {
 			if (flags & ZFS_ITER_ARGS_CAN_BE_PATHS) {
 				zhp = zfs_path_to_zhandle(g_zfs, argv[i],
 				    argtype);

@@ -6,7 +6,7 @@
  * You may not use this file except in compliance with the License.
  *
  * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
- * or http://www.opensolaris.org/os/licensing.
+ * or https://opensource.org/licenses/CDDL-1.0.
  * See the License for the specific language governing permissions
  * and limitations under the License.
  *
@@ -264,36 +264,36 @@ zpool_default_search_paths(size_t *count)
  * index in the passed 'order' variable, otherwise return an error.
  */
 static int
-zfs_path_order(char *name, int *order)
+zfs_path_order(const char *name, int *order)
 {
-	int i, error = ENOENT;
-	char *dir, *env, *envdup, *tmp = NULL;
+	const char *env = getenv("ZPOOL_IMPORT_PATH");
 
-	env = getenv("ZPOOL_IMPORT_PATH");
 	if (env) {
-		envdup = strdup(env);
-		for (dir = strtok_r(envdup, ":", &tmp), i = 0;
-		    dir != NULL;
-		    dir = strtok_r(NULL, ":", &tmp), i++) {
-			if (strncmp(name, dir, strlen(dir)) == 0) {
-				*order = i;
-				error = 0;
+		for (int i = 0; ; ++i) {
+			env += strspn(env, ":");
+			size_t dirlen = strcspn(env, ":");
+			if (dirlen) {
+				if (strncmp(name, env, dirlen) == 0) {
+					*order = i;
+					return (0);
+				}
+
+				env += dirlen;
+			} else
 				break;
-			}
 		}
-		free(envdup);
 	} else {
-		for (i = 0; i < ARRAY_SIZE(zpool_default_import_path); i++) {
+		for (int i = 0; i < ARRAY_SIZE(zpool_default_import_path);
+		    ++i) {
 			if (strncmp(name, zpool_default_import_path[i],
 			    strlen(zpool_default_import_path[i])) == 0) {
 				*order = i;
-				error = 0;
-				break;
+				return (0);
 			}
 		}
 	}
 
-	return (error);
+	return (ENOENT);
 }
 
 /*
@@ -328,7 +328,9 @@ zpool_find_import_blkid(libpc_handle_t *hdl, pthread_mutex_t *lock,
 		return (EINVAL);
 	}
 
-	error = blkid_dev_set_search(iter, "TYPE", "zfs_member");
+	/* Only const char *s since 2.32 */
+	error = blkid_dev_set_search(iter,
+	    (char *)"TYPE", (char *)"zfs_member");
 	if (error != 0) {
 		blkid_dev_iterate_end(iter);
 		blkid_put_cache(cache);
@@ -754,6 +756,9 @@ no_dev:
 
 	return (ret);
 #else
+	(void) path;
+	(void) ds;
+	(void) wholedisk;
 	return (ENOENT);
 #endif
 }

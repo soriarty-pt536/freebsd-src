@@ -941,7 +941,6 @@ mqfs_lookupx(struct vop_cachedlookup_args *ap)
 		error = VOP_ACCESS(dvp, VWRITE, cnp->cn_cred, td);
 		if (error)
 			return (error);
-		cnp->cn_flags |= SAVENAME;
 		return (EJUSTRETURN);
 	}
 	return (ENOENT);
@@ -997,8 +996,6 @@ mqfs_create(struct vop_create_args *ap)
 	if (mq == NULL)
 		return (EAGAIN);
 	sx_xlock(&mqfs->mi_lock);
-	if ((cnp->cn_flags & HASBUF) == 0)
-		panic("%s: no name", __func__);
 	pn = mqfs_create_file(pd, cnp->cn_nameptr, cnp->cn_namelen,
 		cnp->cn_cred, ap->a_vap->va_mode);
 	if (pn == NULL) {
@@ -1492,8 +1489,6 @@ mqfs_mkdir(struct vop_mkdir_args *ap)
 	if (pd->mn_type != mqfstype_root && pd->mn_type != mqfstype_dir)
 		return (ENOTDIR);
 	sx_xlock(&mqfs->mi_lock);
-	if ((cnp->cn_flags & HASBUF) == 0)
-		panic("%s: no name", __func__);
 	pn = mqfs_create_dir(pd, cnp->cn_nameptr, cnp->cn_namelen,
 		ap->a_vap->cn_cred, ap->a_vap->va_mode);
 	if (pn != NULL)
@@ -2350,7 +2345,7 @@ kern_kmq_notify(struct thread *td, int mqd, struct sigevent *sigev)
 		return (error);
 again:
 	FILEDESC_SLOCK(fdp);
-	fp2 = fget_locked(fdp, mqd);
+	fp2 = fget_noref(fdp, mqd);
 	if (fp2 == NULL) {
 		FILEDESC_SUNLOCK(fdp);
 		error = EBADF;
@@ -2482,7 +2477,7 @@ mq_proc_exit(void *arg __unused, struct proc *p)
 	fdp = p->p_fd;
 	FILEDESC_SLOCK(fdp);
 	for (i = 0; i < fdp->fd_nfiles; ++i) {
-		fp = fget_locked(fdp, i);
+		fp = fget_noref(fdp, i);
 		if (fp != NULL && fp->f_ops == &mqueueops) {
 			mq = FPTOMQ(fp);
 			mtx_lock(&mq->mq_mutex);

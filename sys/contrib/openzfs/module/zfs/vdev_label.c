@@ -6,7 +6,7 @@
  * You may not use this file except in compliance with the License.
  *
  * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
- * or http://www.opensolaris.org/os/licensing.
+ * or https://opensource.org/licenses/CDDL-1.0.
  * See the License for the specific language governing permissions
  * and limitations under the License.
  *
@@ -1324,7 +1324,7 @@ vdev_label_read_bootenv(vdev_t *rvd, nvlist_t *bootenv)
 				nvlist_free(config);
 				break;
 			}
-			fallthrough;
+			zfs_fallthrough;
 		default:
 			/* Check for FreeBSD zfs bootonce command string */
 			buf = abd_to_buf(abd);
@@ -1565,7 +1565,7 @@ vdev_uberblock_load(vdev_t *rvd, uberblock_t *ub, nvlist_t **config)
 	ASSERT(ub);
 	ASSERT(config);
 
-	bzero(ub, sizeof (uberblock_t));
+	memset(ub, 0, sizeof (uberblock_t));
 	*config = NULL;
 
 	cb.ubl_ubbest = ub;

@@ -84,7 +84,6 @@ u_long __read_frequently elf32_hwcap2;
 static struct sysentvec elf32_freebsd_sysvec = {
 	.sv_size	= SYS_MAXSYSCALL,
 	.sv_table	= freebsd32_sysent,
-	.sv_transtrap	= NULL,
 	.sv_fixup	= elf32_freebsd_fixup,
 	.sv_sendsig	= freebsd32_sendsig,
 	.sv_sigcode	= aarch32_sigcode,
@@ -288,5 +287,4 @@ freebsd32_setregs(struct thread *td, struct image_params *imgp,
 void
 elf32_dump_thread(struct thread *td, void *dst, size_t *off)
 {
-	/* XXX: VFP */
 }

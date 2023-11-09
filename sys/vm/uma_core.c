@@ -207,7 +207,7 @@ static enum {
  * This is the handle used to schedule events that need to happen
  * outside of the allocation fast path.
  */
-static struct callout uma_callout;
+static struct timeout_task uma_timeout_task;
 #define	UMA_TIMEOUT	20		/* Seconds for callout interval. */
 
 /*
@@ -311,7 +311,7 @@ static void zone_timeout(uma_zone_t zone, void *);
 static int hash_alloc(struct uma_hash *, u_int);
 static int hash_expand(struct uma_hash *, struct uma_hash *);
 static void hash_free(struct uma_hash *hash);
-static void uma_timeout(void *);
+static void uma_timeout(void *, int);
 static void uma_shutdown(void);
 static void *zone_alloc_item(uma_zone_t, void *, int, int);
 static void zone_free_item(uma_zone_t, void *, void *, enum zfreeskip);
@@ -1107,13 +1107,14 @@ zone_maxaction(uma_zone_t zone)
  *	Nothing
  */
 static void
-uma_timeout(void *unused)
+uma_timeout(void *context __unused, int pending __unused)
 {
 	bucket_enable();
 	zone_foreach(zone_timeout, NULL);
 
 	/* Reschedule this event */
-	callout_reset(&uma_callout, UMA_TIMEOUT * hz, uma_timeout, NULL);
+	taskqueue_enqueue_timeout(taskqueue_thread, &uma_timeout_task,
+	    UMA_TIMEOUT * hz);
 }
 
 /*
@@ -1761,6 +1762,8 @@ keg_alloc_slab(uma_keg_t keg, uma_zone_t zone, int domain, int flags,
 	uint8_t sflags;
 	int i;
 
+	TSENTER();
+
 	KASSERT(domain >= 0 && domain < vm_ndomains,
 	    ("keg_alloc_slab: domain %d out of range", domain));
 
@@ -1804,6 +1807,9 @@ keg_alloc_slab(uma_keg_t keg, uma_zone_t zone, int domain, int flags,
 	/* For HASH zones all pages go to the same uma_domain. */
 	if ((keg->uk_flags & UMA_ZFLAG_HASH) != 0)
 		domain = 0;
+
+	kmsan_mark(mem, size,
+	    (aflags & M_ZERO) != 0 ? KMSAN_STATE_INITED : KMSAN_STATE_UNINIT);
 
 	/* Point the slab into the allocated memory */
 	if (!(keg->uk_flags & UMA_ZFLAG_OFFPAGE))
@@ -1854,6 +1860,7 @@ keg_alloc_slab(uma_keg_t keg, uma_zone_t zone, int domain, int flags,
 	dom->ud_pages += keg->uk_ppera;
 	dom->ud_free_items += keg->uk_ipers;
 
+	TSEXIT();
 	return (slab);
 
 fail:
@@ -1940,7 +1947,7 @@ page_alloc(uma_zone_t zone, vm_size_t bytes, int domain, uint8_t *pflag,
 	void *p;	/* Returned page */
 
 	*pflag = UMA_SLAB_KERNEL;
-	p = (void *)kmem_malloc_domainset(DOMAINSET_FIXED(domain), bytes, wait);
+	p = kmem_malloc_domainset(DOMAINSET_FIXED(domain), bytes, wait);
 
 	return (p);
 }
@@ -2097,7 +2104,7 @@ page_free(void *mem, vm_size_t size, uint8_t flags)
 	KASSERT((flags & UMA_SLAB_KERNEL) != 0,
 	    ("UMA: page_free used with invalid flags %x", flags));
 
-	kmem_free((vm_offset_t)mem, size);
+	kmem_free(mem, size);
 }
 
 /*
@@ -3205,14 +3212,22 @@ uma_startup3(void *arg __unused)
 	uma_skip_cnt = counter_u64_alloc(M_WAITOK);
 #endif
 	zone_foreach_unlocked(zone_alloc_sysctl, NULL);
-	callout_init(&uma_callout, 1);
-	callout_reset(&uma_callout, UMA_TIMEOUT * hz, uma_timeout, NULL);
 	booted = BOOT_RUNNING;
 
 	EVENTHANDLER_REGISTER(shutdown_post_sync, uma_shutdown, NULL,
 	    EVENTHANDLER_PRI_FIRST);
 }
 SYSINIT(uma_startup3, SI_SUB_VM_CONF, SI_ORDER_SECOND, uma_startup3, NULL);
+
+static void
+uma_startup4(void *arg __unused)
+{
+	TIMEOUT_TASK_INIT(taskqueue_thread, &uma_timeout_task, 0, uma_timeout,
+	    NULL);
+	taskqueue_enqueue_timeout(taskqueue_thread, &uma_timeout_task,
+	    UMA_TIMEOUT * hz);
+}
+SYSINIT(uma_startup4, SI_SUB_TASKQ, SI_ORDER_ANY, uma_startup4, NULL);
 
 static void
 uma_shutdown(void)
@@ -3494,6 +3509,9 @@ item_domain(void *item)
 #endif
 
 #if defined(INVARIANTS) || defined(DEBUG_MEMGUARD) || defined(WITNESS)
+#if defined(INVARIANTS) && (defined(DDB) || defined(STACK))
+#include <sys/stack.h>
+#endif
 #define	UMA_ZALLOC_DEBUG
 static int
 uma_zalloc_debug(uma_zone_t zone, void **itemp, void *udata, int flags)
@@ -3515,10 +3533,36 @@ uma_zalloc_debug(uma_zone_t zone, void **itemp, void *udata, int flags)
 	    ("uma_zalloc_debug: called within spinlock or critical section"));
 	KASSERT((zone->uz_flags & UMA_ZONE_PCPU) == 0 || (flags & M_ZERO) == 0,
 	    ("uma_zalloc_debug: allocating from a pcpu zone with M_ZERO"));
+
+	_Static_assert(M_NOWAIT != 0 && M_WAITOK != 0,
+	    "M_NOWAIT and M_WAITOK must be non-zero for this assertion:");
+#if 0
+	/*
+	 * Give the #elif clause time to find problems, then remove it
+	 * and enable this.  (Remove <sys/stack.h> above, too.)
+	 */
+	KASSERT((flags & (M_NOWAIT|M_WAITOK)) == M_NOWAIT ||
+	    (flags & (M_NOWAIT|M_WAITOK)) == M_WAITOK,
+	    ("uma_zalloc_debug: must pass one of M_NOWAIT or M_WAITOK"));
+#elif defined(DDB) || defined(STACK)
+	if (__predict_false((flags & (M_NOWAIT|M_WAITOK)) != M_NOWAIT &&
+	    (flags & (M_NOWAIT|M_WAITOK)) != M_WAITOK)) {
+		static int stack_count;
+		struct stack st;
+
+		if (stack_count < 10) {
+			++stack_count;
+			printf("uma_zalloc* called with bad WAIT flags:\n");
+			stack_save(&st);
+			stack_print(&st);
+		}
+	}
+#endif
 #endif
 
 #ifdef DEBUG_MEMGUARD
-	if ((zone->uz_flags & UMA_ZONE_SMR) == 0 && memguard_cmp_zone(zone)) {
+	if ((zone->uz_flags & (UMA_ZONE_SMR | UMA_ZFLAG_CACHE)) == 0 &&
+	    memguard_cmp_zone(zone)) {
 		void *item;
 		item = memguard_alloc(zone->uz_size, flags);
 		if (item != NULL) {
@@ -3553,7 +3597,8 @@ uma_zfree_debug(uma_zone_t zone, void *item, void *udata)
 	    ("uma_zfree_debug: called with spinlock or critical section held"));
 
 #ifdef DEBUG_MEMGUARD
-	if ((zone->uz_flags & UMA_ZONE_SMR) == 0 && is_memguard_addr(item)) {
+	if ((zone->uz_flags & (UMA_ZONE_SMR | UMA_ZFLAG_CACHE)) == 0 &&
+	    is_memguard_addr(item)) {
 		if (zone->uz_dtor != NULL)
 			zone->uz_dtor(item, zone->uz_size, udata);
 		if (zone->uz_fini != NULL)
@@ -3788,12 +3833,6 @@ uma_zalloc_domain(uma_zone_t zone, void *udata, int domain, int flags)
 	CTR4(KTR_UMA, "uma_zalloc_domain zone %s(%p) domain %d flags %d",
 	    zone->uz_name, zone, domain, flags);
 
-	if (flags & M_WAITOK) {
-		WITNESS_WARN(WARN_GIANTOK | WARN_SLEEPOK, NULL,
-		    "uma_zalloc_domain: zone \"%s\"", zone->uz_name);
-	}
-	KASSERT(curthread->td_critnest == 0 || SCHEDULER_STOPPED(),
-	    ("uma_zalloc_domain: called with spinlock or critical section held"));
 	KASSERT((zone->uz_flags & UMA_ZONE_SMR) == 0,
 	    ("uma_zalloc_domain: called with SMR zone."));
 #ifdef NUMA
@@ -3802,6 +3841,11 @@ uma_zalloc_domain(uma_zone_t zone, void *udata, int domain, int flags)
 
 	if (vm_ndomains == 1)
 		return (uma_zalloc_arg(zone, udata, flags));
+
+#ifdef UMA_ZALLOC_DEBUG
+	if (uma_zalloc_debug(zone, &item, udata, flags) == EJUSTRETURN)
+		return (item);
+#endif
 
 	/*
 	 * Try to allocate from the bucket cache before falling back to the keg.
@@ -4236,7 +4280,7 @@ zone_alloc_bucket(uma_zone_t zone, void *udata, int domain, int flags)
 	else
 		maxbucket = zone->uz_bucket_size;
 	if (maxbucket == 0)
-		return (false);
+		return (NULL);
 
 	/* Don't wait for buckets, preserve caller's NOVM setting. */
 	bucket = bucket_alloc(zone, udata, M_NOWAIT | (flags & M_NOVM));
@@ -4367,7 +4411,10 @@ uma_zfree_smr(uma_zone_t zone, void *item)
 {
 	uma_cache_t cache;
 	uma_cache_bucket_t bucket;
-	int itemdomain, uz_flags;
+	int itemdomain;
+#ifdef NUMA
+	int uz_flags;
+#endif
 
 	CTR3(KTR_UMA, "uma_zfree_smr zone %s(%p) item %p",
 	    zone->uz_name, zone, item);
@@ -4381,9 +4428,9 @@ uma_zfree_smr(uma_zone_t zone, void *item)
 		return;
 #endif
 	cache = &zone->uz_cpu[curcpu];
-	uz_flags = cache_uz_flags(cache);
 	itemdomain = 0;
 #ifdef NUMA
+	uz_flags = cache_uz_flags(cache);
 	if ((uz_flags & UMA_ZONE_FIRSTTOUCH) != 0)
 		itemdomain = item_domain(item);
 #endif
@@ -4853,6 +4900,8 @@ uma_zone_set_max(uma_zone_t zone, int nitems)
 	 * way to clear a limit.
 	 */
 	ZONE_LOCK(zone);
+	if (zone->uz_max_items == 0)
+		ZONE_ASSERT_COLD(zone);
 	zone->uz_max_items = nitems;
 	zone->uz_flags |= UMA_ZFLAG_LIMIT;
 	zone_update_caches(zone);
@@ -5778,7 +5827,7 @@ get_uma_stats(uma_keg_t kz, uma_zone_t z, uint64_t *allocs, uint64_t *used,
 	return (((int64_t)*used + *cachefree) * kz->uk_size);
 }
 
-DB_SHOW_COMMAND(uma, db_show_uma)
+DB_SHOW_COMMAND_FLAGS(uma, db_show_uma, DB_CMD_MEMSAFE)
 {
 	const char *fmt_hdr, *fmt_entry;
 	uma_keg_t kz;
@@ -5851,7 +5900,7 @@ DB_SHOW_COMMAND(uma, db_show_uma)
 	}
 }
 
-DB_SHOW_COMMAND(umacache, db_show_umacache)
+DB_SHOW_COMMAND_FLAGS(umacache, db_show_umacache, DB_CMD_MEMSAFE)
 {
 	uma_zone_t z;
 	uint64_t allocs, frees;

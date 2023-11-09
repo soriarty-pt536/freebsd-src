@@ -7,7 +7,7 @@
 # You may not use this file except in compliance with the License.
 #
 # You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
-# or http://www.opensolaris.org/os/licensing.
+# or https://opensource.org/licenses/CDDL-1.0.
 # See the License for the specific language governing permissions
 # and limitations under the License.
 #
@@ -178,8 +178,8 @@ log_must rm /$TESTPOOL/$TESTFS/link_and_unlink.link
 #
 # 4. Copy TESTFS to temporary location (TESTDIR/copy)
 #
-log_must mkdir -p $TESTDIR/copy
-log_must cp -a /$TESTPOOL/$TESTFS/* $TESTDIR/copy/
+log_must mkdir -p $TESTDIR
+log_must rsync -aHAX /$TESTPOOL/$TESTFS/ $TESTDIR/copy
 
 #
 # 5. Unmount filesystem and export the pool
@@ -213,7 +213,7 @@ log_must ls_xattr /$TESTPOOL/$TESTFS/xattr.dir
 log_must ls_xattr /$TESTPOOL/$TESTFS/xattr.file
 
 log_note "Verify working set diff:"
-log_must diff -r /$TESTPOOL/$TESTFS $TESTDIR/copy
+log_must replay_directory_diff $TESTDIR/copy /$TESTPOOL/$TESTFS
 
 log_note "Verify file checksum:"
 typeset checksum1=$(sha256digest /$TESTPOOL/$TESTFS/payload)

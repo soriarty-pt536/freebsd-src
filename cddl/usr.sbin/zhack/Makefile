@@ -1,7 +1,8 @@
 # $FreeBSD$
 
-.PATH: ${SRCTOP}/sys/contrib/openzfs/cmd/zhack
+.PATH: ${SRCTOP}/sys/contrib/openzfs/cmd
 
+PACKAGE=	zfs
 PROG=	zhack
 MAN=
 

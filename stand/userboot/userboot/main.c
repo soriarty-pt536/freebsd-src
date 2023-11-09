@@ -70,6 +70,18 @@ delay(int usec)
 	CALLBACK(delay, usec);
 }
 
+time_t
+getsecs(void)
+{
+
+	/*
+	 * userboot can't do netboot, so this implementation isn't strictly
+	 * required.  Defining it avoids issues with BIND_NOW, and it doesn't
+	 * hurt to do it.
+	 */
+	return (time(NULL));
+}
+
 void
 exit(int v)
 {
@@ -248,7 +260,7 @@ extract_currdev(void)
 		bzero(&zdev, sizeof(zdev));
 		zdev.dd.d_dev = &zfs_dev;
 		
-		init_zfs_boot_options(zfs_fmtdev(&zdev));
+		init_zfs_boot_options(devformat(&zdev.dd));
 		dd = &zdev.dd;
 	} else
 #endif
@@ -273,7 +285,7 @@ extract_currdev(void)
 		dd = &dev.dd;
 	}
 
-	set_currdev(userboot_fmtdev(dd));
+	set_currdev(devformat(dd));
 
 #if defined(USERBOOT_ZFS_SUPPORT)
 	if (userboot_zfs_found) {

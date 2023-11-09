@@ -377,8 +377,7 @@ static driver_t em_driver = {
 	"em", em_methods, sizeof(struct e1000_softc),
 };
 
-static devclass_t em_devclass;
-DRIVER_MODULE(em, pci, em_driver, em_devclass, 0, 0);
+DRIVER_MODULE(em, pci, em_driver, 0, 0);
 
 MODULE_DEPEND(em, pci, 1, 1, 1);
 MODULE_DEPEND(em, ether, 1, 1, 1);
@@ -390,8 +389,7 @@ static driver_t igb_driver = {
 	"igb", igb_methods, sizeof(struct e1000_softc),
 };
 
-static devclass_t igb_devclass;
-DRIVER_MODULE(igb, pci, igb_driver, igb_devclass, 0, 0);
+DRIVER_MODULE(igb, pci, igb_driver, 0, 0);
 
 MODULE_DEPEND(igb, pci, 1, 1, 1);
 MODULE_DEPEND(igb, ether, 1, 1, 1);
@@ -903,7 +901,7 @@ em_if_attach_pre(if_ctx_t ctx)
 		 * that it shall give MSI at least a try with other devices.
 		 */
 		if (hw->mac.type == e1000_82574) {
-			scctx->isc_msix_bar = pci_msix_table_bar(dev);;
+			scctx->isc_msix_bar = pci_msix_table_bar(dev);
 		} else {
 			scctx->isc_msix_bar = -1;
 			scctx->isc_disable_msix = 1;
@@ -1735,6 +1733,9 @@ em_if_multi_set(if_ctx_t ctx)
 
 	mcnt = if_foreach_llmaddr(ifp, em_copy_maddr, mta);
 
+	if (mcnt < MAX_NUM_MULTICAST_ADDRESSES)
+		e1000_update_mc_addr_list(&sc->hw, mta, mcnt);
+
 	reg_rctl = E1000_READ_REG(&sc->hw, E1000_RCTL);
 
 	if (if_getflags(ifp) & IFF_PROMISC)
@@ -1747,9 +1748,6 @@ em_if_multi_set(if_ctx_t ctx)
 		reg_rctl &= ~(E1000_RCTL_UPE | E1000_RCTL_MPE);
 
 	E1000_WRITE_REG(&sc->hw, E1000_RCTL, reg_rctl);
-
-	if (mcnt < MAX_NUM_MULTICAST_ADDRESSES)
-		e1000_update_mc_addr_list(&sc->hw, mta, mcnt);
 
 	if (sc->hw.mac.type == e1000_82542 &&
 	    sc->hw.revision_id == E1000_REVISION_2) {
@@ -2475,7 +2473,7 @@ em_reset(if_ctx_t ctx)
 	struct e1000_softc *sc = iflib_get_softc(ctx);
 	struct ifnet *ifp = iflib_get_ifp(ctx);
 	struct e1000_hw *hw = &sc->hw;
-	u16 rx_buffer_size;
+	u32 rx_buffer_size;
 	u32 pba;
 
 	INIT_DEBUGOUT("em_reset: begin");

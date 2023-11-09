@@ -105,7 +105,6 @@ COMPILING_LINT	opt_global.h
 CY_PCI_FASTINTR
 DEADLKRES	opt_watchdog.h
 EXPERIMENTAL	opt_global.h
-EXT_RESOURCES	opt_global.h
 DIRECTIO
 FILEMON		opt_dontuse.h
 FFCLOCK
@@ -157,6 +156,7 @@ LIBICONV
 MAC		opt_global.h
 MAC_BIBA	opt_dontuse.h
 MAC_BSDEXTENDED	opt_dontuse.h
+MAC_DDB		opt_dontuse.h
 MAC_IFOFF	opt_dontuse.h
 MAC_LOMAC	opt_dontuse.h
 MAC_MLS		opt_dontuse.h
@@ -587,7 +587,6 @@ IFMEDIA_DEBUG		opt_ifmedia.h
 
 # Fb options
 FB_DEBUG		opt_fb.h
-FB_INSTALL_CDEV		opt_fb.h
 
 # ppbus related options
 PERIPH_1284		opt_ppb_1284.h
@@ -719,7 +718,7 @@ IOMMU			opt_iommu.h
 
 # ISA support
 DEV_ISA			opt_isa.h
-ISAPNP			opt_isa.h
+ISAPNP			opt_dontuse.h
 
 # various 'device presence' options.
 DEV_BPF			opt_bpf.h

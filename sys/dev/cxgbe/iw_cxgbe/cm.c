@@ -68,7 +68,7 @@ struct cpl_set_tcb_rpl;
 #include "offload.h"
 #include "tom/t4_tom.h"
 
-#define TOEPCB(so)  ((struct toepcb *)(so_sototcpcb((so))->t_toe))
+#define TOEPCB(so)  ((struct toepcb *)(sototcpcb((so))->t_toe))
 
 #include "iw_cxgbe.h"
 #include <linux/module.h>
@@ -938,8 +938,7 @@ static inline int c4iw_zero_addr(struct sockaddr *addr)
 	struct in6_addr *ip6;
 
 	if (addr->sa_family == AF_INET)
-		return IN_ZERONET(
-			ntohl(((struct sockaddr_in *)addr)->sin_addr.s_addr));
+		return (((struct sockaddr_in *)addr)->sin_addr.s_addr == 0);
 	else {
 		ip6 = &((struct sockaddr_in6 *) addr)->sin6_addr;
 		return (ip6->s6_addr32[0] | ip6->s6_addr32[1] |
@@ -1029,7 +1028,7 @@ process_newconn(struct c4iw_listen_ep *master_lep, struct socket *new_so)
 
 	/* MPA request might have been queued up on the socket already, so we
 	 * initialize the socket/upcall_handler under lock to prevent processing
-	 * MPA request on another thread(via process_req()) simultaniously.
+	 * MPA request on another thread(via process_req()) simultaneously.
 	 */
 	c4iw_get_ep(&new_ep->com); /* Dereferenced at the end below, this is to
 				      avoid freeing of ep before ep unlock. */
@@ -2738,7 +2737,7 @@ c4iw_create_listen(struct iw_cm_id *cm_id, int backlog)
 	if (c4iw_any_addr((struct sockaddr *)&lep->com.local_addr)) {
 		port_info = add_ep_to_listenlist(lep);
 		/* skip solisten() if refcnt > 1, as the listeners were
-		 * alredy created by 'Master lep'
+		 * already created by 'Master lep'
 		 */
 		if (port_info->refcnt > 1) {
 			/* As there will be only one listener socket for a TCP

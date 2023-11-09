@@ -150,6 +150,9 @@ static struct val2str str_alg_auth[] = {
 #ifdef SADB_X_AALG_AES_XCBC_MAC
 	{ SADB_X_AALG_AES_XCBC_MAC, "aes-xcbc-mac", },
 #endif
+#ifdef SADB_X_AALG_CHACHA20POLY1305
+	{ SADB_X_AALG_CHACHA20POLY1305, "chacha20-poly1305", },
+#endif
 	{ -1, NULL, },
 };
 
@@ -171,6 +174,9 @@ static struct val2str str_alg_enc[] = {
 #ifdef SADB_X_EALG_AESGCM16
 	{ SADB_X_EALG_AESGCM16, "aes-gcm-16", },
 #endif
+#ifdef SADB_X_EALG_CHACHA20POLY1305
+	{ SADB_X_EALG_CHACHA20POLY1305, "chacha20-poly1305", },
+#endif
 	{ -1, NULL, },
 };
 
@@ -190,7 +196,7 @@ static struct val2str str_sp_scope[] = {
 };
 
 /*
- * dump SADB_MSG formated.  For debugging, you should use kdebug_sadb().
+ * dump SADB_MSG formatted.  For debugging, you should use kdebug_sadb().
  */
 void
 pfkey_sadump(m)

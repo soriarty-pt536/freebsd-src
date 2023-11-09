@@ -31,6 +31,7 @@
 #ifndef _VMM_H_
 #define	_VMM_H_
 
+#include <sys/cpuset.h>
 #include <sys/sdt.h>
 #include <x86/segments.h>
 
@@ -365,13 +366,10 @@ vcpu_is_running(struct vm *vm, int vcpu, int *hostcpu)
 static int __inline
 vcpu_should_yield(struct vm *vm, int vcpu)
 {
+	struct thread *td;
 
-	if (curthread->td_flags & (TDF_ASTPENDING | TDF_NEEDRESCHED))
-		return (1);
-	else if (curthread->td_owepreempt)
-		return (1);
-	else
-		return (0);
+	td = curthread;
+	return (td->td_ast != 0 || td->td_owepreempt != 0);
 }
 #endif
 
@@ -467,9 +465,12 @@ void vm_copyout(struct vm *vm, int vcpuid, const void *kaddr,
     struct vm_copyinfo *copyinfo, size_t len);
 
 int vcpu_trace_exceptions(struct vm *vm, int vcpuid);
+int vcpu_trap_wbinvd(struct vm *vm, int vcpuid);
 #endif	/* KERNEL */
 
+#ifdef _KERNEL
 #define	VM_MAXCPU	16			/* maximum virtual cpus */
+#endif
 
 /*
  * Identifiers for optional vmm capabilities
@@ -483,6 +484,7 @@ enum vm_cap_type {
 	VM_CAP_BPT_EXIT,
 	VM_CAP_RDPID,
 	VM_CAP_RDTSCP,
+	VM_CAP_IPI_EXIT,
 	VM_CAP_MAX
 };
 
@@ -630,6 +632,7 @@ enum vm_exitcode {
 	VM_EXITCODE_DEBUG,
 	VM_EXITCODE_VMINSN,
 	VM_EXITCODE_BPT,
+	VM_EXITCODE_IPI,
 	VM_EXITCODE_MAX
 };
 
@@ -737,6 +740,11 @@ struct vm_exit {
 		struct {
 			enum vm_suspend_how how;
 		} suspended;
+		struct {
+			uint32_t mode;
+			uint8_t vector;
+			cpuset_t dmask;
+		} ipi;
 		struct vm_task_switch task_switch;
 	} u;
 };

@@ -7,7 +7,7 @@
 # You may not use this file except in compliance with the License.
 #
 # You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
-# or http://www.opensolaris.org/os/licensing.
+# or https://opensource.org/licenses/CDDL-1.0.
 # See the License for the specific language governing permissions
 # and limitations under the License.
 #
@@ -60,8 +60,8 @@ log_onexit cleanup
 
 log_must mkfile $MINVDEVSIZE $TESTDIR/bfile
 log_must mkfile $SPA_MINDEVSIZE  $TESTDIR/sfile
-log_must zpool create bpool $TESTDIR/bfile
-log_must zpool create spool $TESTDIR/sfile
+log_must zpool create -O compression=off bpool $TESTDIR/bfile
+log_must zpool create -O compression=off spool $TESTDIR/sfile
 
 #
 # Test out of space on sub-filesystem

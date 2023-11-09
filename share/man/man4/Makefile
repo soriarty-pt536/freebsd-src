@@ -15,6 +15,7 @@ MAN=	aac.4 \
 	${_acpi_panasonic.4} \
 	${_acpi_rapidstart.4} \
 	${_acpi_sony.4} \
+	acpi_ged.4 \
 	acpi_thermal.4 \
 	acpi_battery.4 \
 	${_acpi_toshiba.4} \
@@ -70,6 +71,7 @@ MAN=	aac.4 \
 	axge.4 \
 	axp.4 \
 	bce.4 \
+	bcm5974.4 \
 	bcma.4 \
 	bfe.4 \
 	bge.4 \
@@ -81,6 +83,7 @@ MAN=	aac.4 \
 	bhndb_pci.4 \
 	blackhole.4 \
 	bnxt.4 \
+	boottrace.4 \
 	bpf.4 \
 	bridge.4 \
 	bwi.4 \
@@ -210,6 +213,7 @@ MAN=	aac.4 \
 	icmp.4 \
 	icmp6.4 \
 	ida.4 \
+	ietp.4 \
 	if_ipsec.4 \
 	iflib.4 \
 	ifmib.4 \
@@ -281,6 +285,7 @@ MAN=	aac.4 \
 	mac.4 \
 	mac_biba.4 \
 	mac_bsdextended.4 \
+	mac_ddb.4 \
 	mac_ifoff.4 \
 	mac_lomac.4 \
 	mac_mls.4 \
@@ -415,6 +420,7 @@ MAN=	aac.4 \
 	ow.4 \
 	ow_temp.4 \
 	owc.4 \
+	ovpn.4 \
 	${_padlock.4} \
 	pass.4 \
 	pca954x.4 \
@@ -448,7 +454,7 @@ MAN=	aac.4 \
 	pty.4 \
 	puc.4 \
 	pwmc.4 \
-	${_qat.4} \
+	${_qat_c2xxx.4} \
 	${_qlxge.4} \
 	${_qlxgb.4} \
 	${_qlxgbe.4} \
@@ -463,6 +469,8 @@ MAN=	aac.4 \
 	rndtest.4 \
 	route.4 \
 	rtsx.4 \
+	rtw88.4 \
+	rtw88fw.4 \
 	rtwn.4 \
 	rtwnfw.4 \
 	rtwn_pci.4 \
@@ -496,29 +504,22 @@ MAN=	aac.4 \
 	smbus.4 \
 	smp.4 \
 	smsc.4 \
-	snd_ad1816.4 \
 	snd_als4000.4 \
 	snd_atiixp.4 \
 	snd_cmi.4 \
 	snd_cs4281.4 \
 	snd_csa.4 \
-	snd_ds1.4 \
 	snd_emu10k1.4 \
 	snd_emu10kx.4 \
 	snd_envy24.4 \
 	snd_envy24ht.4 \
 	snd_es137x.4 \
-	snd_ess.4 \
 	snd_fm801.4 \
-	snd_gusc.4 \
 	snd_hda.4 \
 	snd_hdspe.4 \
 	snd_ich.4 \
 	snd_maestro3.4 \
-	snd_maestro.4 \
-	snd_mss.4 \
 	snd_neomagic.4 \
-	snd_sbc.4 \
 	snd_solo.4 \
 	snd_spicds.4 \
 	snd_t4dwave.4 \
@@ -551,6 +552,7 @@ MAN=	aac.4 \
 	ti.4 \
 	timecounters.4 \
 	${_tpm.4} \
+	tslog.4 \
 	tty.4 \
 	tun.4 \
 	twe.4 \
@@ -582,6 +584,7 @@ MAN=	aac.4 \
 	vtnet.4 \
 	watchdog.4 \
 	${_wbwd.4} \
+	wg.4 \
 	witness.4 \
 	wlan.4 \
 	wlan_acl.4 \
@@ -737,8 +740,6 @@ MLINKS+=sk.4 if_sk.4
 MLINKS+=smp.4 SMP.4
 MLINKS+=smsc.4 if_smsc.4
 MLINKS+=snd_envy24.4 snd_ak452x.4
-MLINKS+=snd_sbc.4 snd_sb16.4 \
-	snd_sbc.4 snd_sb8.4
 MLINKS+=${_spkr.4} ${_speaker.4}
 MLINKS+=splash.4 screensaver.4
 MLINKS+=ste.4 if_ste.4
@@ -761,6 +762,7 @@ MLINKS+=vr.4 if_vr.4
 MLINKS+=vte.4 if_vte.4
 MLINKS+=vtnet.4 if_vtnet.4
 MLINKS+=watchdog.4 SW_WATCHDOG.4
+MLINKS+=wg.4 if_wg.4
 MLINKS+=${_wpi.4} ${_if_wpi.4}
 MLINKS+=xl.4 if_xl.4
 
@@ -832,7 +834,7 @@ _nvme.4=	nvme.4
 _nvram.4=	nvram.4
 _padlock.4=	padlock.4
 _pchtherm.4=	pchtherm.4
-_qat.4=		qat.4
+_qat_c2xxx.4=	qat_c2xxx.4
 _rr232x.4=	rr232x.4
 _speaker.4=	speaker.4
 _spkr.4=	spkr.4
@@ -919,6 +921,7 @@ _ccd.4=		ccd.4
 _dtrace_provs=	dtrace_audit.4 \
 		dtrace_io.4 \
 		dtrace_ip.4 \
+		dtrace_kinst.4 \
 		dtrace_lockstat.4 \
 		dtrace_proc.4 \
 		dtrace_sched.4 \

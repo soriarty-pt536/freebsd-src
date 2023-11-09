@@ -178,7 +178,7 @@ kmsan_report_hook(const void *addr, size_t size, size_t off, const char *hook)
 	char buf[128];
 	int type;
 
-	if (__predict_false(panicstr != NULL || kdb_active || kmsan_reporting))
+	if (__predict_false(KERNEL_PANICKED() || kdb_active || kmsan_reporting))
 		return;
 
 	kmsan_reporting = true;
@@ -234,7 +234,7 @@ kmsan_report_inline(msan_orig_t orig, unsigned long pc)
 	long foff;
 	int type;
 
-	if (__predict_false(panicstr != NULL || kdb_active || kmsan_reporting))
+	if (__predict_false(KERNEL_PANICKED() || kdb_active || kmsan_reporting))
 		return;
 
 	kmsan_reporting = true;
@@ -1375,6 +1375,7 @@ MSAN_ATOMIC_FUNC_FCMPSET(int, u_int);
 MSAN_ATOMIC_FUNC_FCMPSET(long, u_long);
 MSAN_ATOMIC_FUNC_FCMPSET(ptr, uintptr_t);
 
+_MSAN_ATOMIC_FUNC_LOAD(bool, bool);
 MSAN_ATOMIC_FUNC_LOAD(8, uint8_t);
 MSAN_ATOMIC_FUNC_LOAD(16, uint16_t);
 MSAN_ATOMIC_FUNC_LOAD(32, uint32_t);
@@ -1385,6 +1386,7 @@ MSAN_ATOMIC_FUNC_LOAD(int, u_int);
 MSAN_ATOMIC_FUNC_LOAD(long, u_long);
 MSAN_ATOMIC_FUNC_LOAD(ptr, uintptr_t);
 
+_MSAN_ATOMIC_FUNC_STORE(bool, bool);
 MSAN_ATOMIC_FUNC_STORE(8, uint8_t);
 MSAN_ATOMIC_FUNC_STORE(16, uint16_t);
 MSAN_ATOMIC_FUNC_STORE(32, uint32_t);

@@ -637,7 +637,7 @@ ng_btsocket_rfcomm_connect(struct socket *so, struct sockaddr *nam,
  */
 
 int
-ng_btsocket_rfcomm_control(struct socket *so, u_long cmd, caddr_t data,
+ng_btsocket_rfcomm_control(struct socket *so, u_long cmd, void *data,
 		struct ifnet *ifp, struct thread *td)
 {
 	return (EINVAL);
@@ -1637,8 +1637,8 @@ ng_btsocket_rfcomm_session_send(ng_btsocket_rfcomm_session_p s)
 			return (0); /* we are done */
 
 		/* Call send function on the L2CAP socket */
-		error = (*s->l2so->so_proto->pr_usrreqs->pru_send)(s->l2so,
-				0, m, NULL, NULL, curthread /* XXX */);
+		error = s->l2so->so_proto->pr_send(s->l2so, 0, m, NULL, NULL,
+		    curthread /* XXX */);
 		if (error != 0) {
 			NG_BTSOCKET_RFCOMM_ERR(
 "%s: Could not send data to L2CAP socket, error=%d\n", __func__, error);
@@ -2001,7 +2001,7 @@ ng_btsocket_rfcomm_receive_sabm(ng_btsocket_rfcomm_session_p s, int dlci)
 	/* Make sure multiplexor channel is open */
 	if (s->state != NG_BTSOCKET_RFCOMM_SESSION_OPEN) {
 		NG_BTSOCKET_RFCOMM_ERR(
-"%s: Got SABM for dlci=%d with mulitplexor channel closed, state=%d, " \
+"%s: Got SABM for dlci=%d with multiplexor channel closed, state=%d, " \
 "flags=%#x\n",		__func__, dlci, s->state, s->flags);
 
 		return (EINVAL);
